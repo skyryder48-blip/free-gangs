@@ -95,21 +95,19 @@ lib.callback.register('freegangs:bribes:getJailedMembers', function(source)
     
     local jailed = {}
     
+    -- Get jailed members from Prison module
+    local jailedCitizenIds = FreeGangs.Server.Prison.GetJailedMembers(gangName)
+    local jailedLookup = {}
+    for _, cid in ipairs(jailedCitizenIds) do
+        jailedLookup[cid] = true
+    end
+
     for _, member in pairs(members) do
-        -- STUB: This would integrate with a prison system
-        -- Check if player is jailed and get their remaining time
         local player = FreeGangs.Bridge.GetPlayerByCitizenId(member.citizenid)
         if player then
-            local isJailed = false -- Would check actual jail status
-            local timeRemaining = '0 min' -- Would get actual time
-            
-            -- Example integration:
-            -- local jailData = exports['your_jail_resource']:GetJailStatus(member.citizenid)
-            -- if jailData and jailData.isJailed then
-            --     isJailed = true
-            --     timeRemaining = jailData.remainingTime .. ' min'
-            -- end
-            
+            local isJailed = jailedLookup[member.citizenid] or false
+            local timeRemaining = '0 min'
+
             if isJailed then
                 jailed[#jailed + 1] = {
                     citizenid = member.citizenid,
@@ -196,13 +194,8 @@ lib.callback.register('freegangs:bribes:shouldBlockDispatch', function(source, z
     end
     
     -- Check zone control (>50% required)
-    -- STUB: Replace with actual Territory module
-    local control = 0
-    if FreeGangs.Server.Territories and FreeGangs.Server.Territories[zoneName] then
-        local influence = FreeGangs.Server.Territories[zoneName].influence
-        control = influence and influence[gangName] or 0
-    end
-    
+    local control = FreeGangs.Server.Territory.GetInfluence(zoneName, gangName)
+
     return control >= 50
 end)
 
@@ -222,13 +215,8 @@ lib.callback.register('freegangs:bribes:getDispatchDelay', function(source, zone
     end
     
     -- Check zone control (>50% required)
-    -- STUB: Replace with actual Territory module
-    local control = 0
-    if FreeGangs.Server.Territories and FreeGangs.Server.Territories[zoneName] then
-        local influence = FreeGangs.Server.Territories[zoneName].influence
-        control = influence and influence[gangName] or 0
-    end
-    
+    local control = FreeGangs.Server.Territory.GetInfluence(zoneName, gangName)
+
     if control >= 50 then
         return 60 -- 60 second delay
     end

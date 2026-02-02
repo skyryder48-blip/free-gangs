@@ -31,108 +31,49 @@ local playerHourlyStats = {}
 local protectionCollections = {}
 
 -- ============================================================================
--- STUB FUNCTIONS (Replace when other phases complete)
+-- MODULE DELEGATES
 -- ============================================================================
 
----STUB: Get zone control tier for a gang in a zone
+---Get zone control tier for a gang in a zone
 ---@param zoneName string
 ---@param gangName string
 ---@return table
 local function GetZoneControlTier(zoneName, gangName)
-    -- TODO: STUB - Replace with FreeGangs.Server.Territory.GetControlTier()
-    local territory = FreeGangs.Server.Territories[zoneName]
-    if not territory then
-        return {
-            tier = 1,
-            drugProfitMod = -0.20,
-            canCollectProtection = false,
-            protectionMultiplier = 0,
-        }
-    end
-    
-    local influence = territory.influence or {}
-    local gangInfluence = influence[gangName] or 0
-    
-    -- Find matching tier
-    for tier, tierData in pairs(FreeGangs.ZoneControlTiers) do
-        if gangInfluence >= tierData.minControl and gangInfluence <= tierData.maxControl then
-            return {
-                tier = tier,
-                drugProfitMod = tierData.drugProfit,
-                canCollectProtection = tierData.canCollectProtection,
-                protectionMultiplier = tierData.protectionMultiplier or 1,
-                influence = gangInfluence,
-            }
-        end
-    end
-    
+    local tierData = FreeGangs.Server.Territory.GetControlTier(zoneName, gangName)
+    local influence = FreeGangs.Server.Territory.GetInfluence(zoneName, gangName)
     return {
-        tier = 1,
-        drugProfitMod = -0.20,
-        canCollectProtection = false,
-        protectionMultiplier = 0,
-        influence = gangInfluence,
+        tier = tierData.tier or 1,
+        drugProfitMod = tierData.drugProfit or -0.20,
+        canCollectProtection = tierData.canCollectProtection or false,
+        protectionMultiplier = tierData.protectionMultiplier or 0,
+        influence = influence,
     }
 end
 
----STUB: Add heat between gangs
+---Add heat between gangs
 ---@param gangA string
 ---@param gangB string
 ---@param amount number
 ---@param reason string
 local function AddHeat(gangA, gangB, amount, reason)
-    -- TODO: STUB - Replace with FreeGangs.Server.Heat.Add()
     if not gangA or not gangB or gangA == gangB then return end
-    
-    local key = FreeGangs.Utils.GetHeatKey(gangA, gangB)
-    local heatData = FreeGangs.Server.Heat[key]
-    
-    if not heatData then
-        heatData = {
-            gang_a = gangA < gangB and gangA or gangB,
-            gang_b = gangA < gangB and gangB or gangA,
-            heat_level = 0,
-            stage = FreeGangs.HeatStages.NEUTRAL,
-        }
-        FreeGangs.Server.Heat[key] = heatData
-    end
-    
-    heatData.heat_level = math.min(FreeGangs.Config.Heat.MaxHeat, heatData.heat_level + amount)
-    FreeGangs.Server.Cache.MarkDirty('heat', key)
-    
-    FreeGangs.Utils.Debug('Added heat:', amount, 'between', gangA, 'and', gangB, 'for', reason)
+    FreeGangs.Server.Heat.Add(gangA, gangB, amount, reason)
 end
 
----STUB: Get heat stage between gangs
+---Get heat stage between gangs
 ---@param gangA string
 ---@param gangB string
 ---@return string stage
 local function GetHeatStage(gangA, gangB)
-    -- TODO: STUB - Replace with FreeGangs.Server.Heat.GetStage()
-    local key = FreeGangs.Utils.GetHeatKey(gangA, gangB)
-    local heatData = FreeGangs.Server.Heat[key]
-    return heatData and heatData.stage or FreeGangs.HeatStages.NEUTRAL
+    return FreeGangs.Server.Heat.GetStage(gangA, gangB)
 end
 
----STUB: Add zone influence
+---Add zone influence
 ---@param zoneName string
 ---@param gangName string
 ---@param amount number
 local function AddZoneInfluence(zoneName, gangName, amount)
-    -- TODO: STUB - Replace with FreeGangs.Server.Territory.AddInfluence()
-    local territory = FreeGangs.Server.Territories[zoneName]
-    if not territory then return end
-    
-    territory.influence = territory.influence or {}
-    territory.influence[gangName] = math.min(100, (territory.influence[gangName] or 0) + amount)
-    
-    FreeGangs.Server.Cache.MarkDirty('territory', zoneName)
-    
-    -- Update GlobalState for client sync
-    GlobalState['territory:' .. zoneName] = {
-        influence = territory.influence,
-        updated = os.time(),
-    }
+    FreeGangs.Server.Territory.AddInfluence(zoneName, gangName, amount, 'activity')
 end
 
 -- ============================================================================

@@ -528,10 +528,7 @@ function FreeGangs.Server.Territory.ProcessCapture(zoneName, oldOwner, newOwner)
     local territory = territoryCache[zoneName]
     if not territory then return end
     
-    -- STUB: Check if gangs are at war (replace when Heat Phase complete)
-    -- local areAtWar = FreeGangs.Server.War.AreGangsAtWar(oldOwner, newOwner)
-    -- TODO: STUB - Replace with FreeGangs.Server.War.AreGangsAtWar()
-    local areAtWar = false
+    local areAtWar = oldOwner and FreeGangs.Server.War.IsAtWarWith(oldOwner, newOwner) or false
     
     -- Set cooldown
     local cooldownSeconds = FreeGangs.Config.Territory.CaptureCooldownSeconds

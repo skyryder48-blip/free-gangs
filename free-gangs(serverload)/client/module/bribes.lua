@@ -801,7 +801,6 @@ function FreeGangs.Client.Bribes.ShouldBlockDispatch()
     local playerGang = FreeGangs.Client.PlayerGang
     if not playerGang then return false end
     
-    -- STUB: Check zone control (would come from Territory module)
     local control = FreeGangs.Client.Bribes.GetZoneControl(currentZone.name, playerGang.name)
     
     return control >= 50
@@ -821,7 +820,6 @@ function FreeGangs.Client.Bribes.GetDispatchDelay()
     local playerGang = FreeGangs.Client.PlayerGang
     if not playerGang then return 0 end
     
-    -- STUB: Check zone control
     local control = FreeGangs.Client.Bribes.GetZoneControl(currentZone.name, playerGang.name)
     
     if control >= 50 then
@@ -842,19 +840,18 @@ function FreeGangs.Client.Bribes.GetSentenceModifier()
     return 0.70
 end
 
----Get zone control percentage (STUB)
+---Get zone control percentage for a gang in a zone
 ---@param zoneName string
 ---@param gangName string
 ---@return number
 function FreeGangs.Client.Bribes.GetZoneControl(zoneName, gangName)
-    -- STUB: Replace with actual Territory module integration
-    local territories = FreeGangs.Client.Cache.Get('territories') or {}
-    local territory = territories[zoneName]
-    
+    local allTerritories = FreeGangs.Client.Territory.GetAllTerritories()
+    local territory = allTerritories and allTerritories[zoneName]
+
     if territory and territory.influence then
         return territory.influence[gangName] or 0
     end
-    
+
     return 0
 end
 

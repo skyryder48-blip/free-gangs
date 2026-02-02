@@ -1054,16 +1054,42 @@ end
 ---@param coords vector3
 ---@return table|nil
 function FreeGangs.Client.Archetypes.GetCurrentTerritoryZone(coords)
-    -- This would integrate with your territory system
-    -- For now, return a stub that server can validate
-    
     local zoneId = GetNameOfZone(coords.x, coords.y, coords.z)
-    
+    local allTerritories = FreeGangs.Client.Territory.GetAllTerritories()
+    local territory = allTerritories and allTerritories[zoneId]
+    local playerGang = FreeGangs.Client.PlayerGang
+
+    local isOwned = false
+    local isOpposition = false
+    local oppositionGang = nil
+
+    if territory and territory.influence and playerGang then
+        local gangName = playerGang.name
+        local dominantGang = nil
+        local dominantInfluence = 0
+
+        for gang, influence in pairs(territory.influence) do
+            if influence > dominantInfluence then
+                dominantGang = gang
+                dominantInfluence = influence
+            end
+        end
+
+        if dominantGang and dominantInfluence >= 51 then
+            if dominantGang == gangName then
+                isOwned = true
+            else
+                isOpposition = true
+                oppositionGang = dominantGang
+            end
+        end
+    end
+
     return {
         name = zoneId,
-        isOwned = false, -- Server determines this
-        isOpposition = false,
-        oppositionGang = nil,
+        isOwned = isOwned,
+        isOpposition = isOpposition,
+        oppositionGang = oppositionGang,
     }
 end
 
@@ -1522,7 +1548,7 @@ function FreeGangs.Client.Archetypes.ExecuteActivity(activityId)
 end
 
 -- ============================================================================
--- PRISON ACTIVITIES (STUBS)
+-- PRISON ACTIVITIES
 -- ============================================================================
 
 function FreeGangs.Client.Prison.HandleContrabandReady()
