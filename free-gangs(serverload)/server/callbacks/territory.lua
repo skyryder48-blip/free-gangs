@@ -414,10 +414,7 @@ lib.callback.register('free-gangs:callback:getActivityModifiers', function(sourc
     
     -- Check if in rival territory
     if owner and owner ~= playerGang then
-        -- STUB: Check rivalry stage
-        -- local heatStage = FreeGangs.Server.Heat.GetStage(playerGang, owner)
-        -- TODO: STUB - Replace with FreeGangs.Server.Heat.GetStage()
-        local heatStage = 'neutral'
+        local heatStage = FreeGangs.Server.Heat.GetStage(playerGang, owner)
         
         if heatStage == 'rivalry' then
             modifiers.drugProfit = -0.70 -- -70% in rival territory during rivalry

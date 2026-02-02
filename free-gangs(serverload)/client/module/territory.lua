@@ -212,10 +212,8 @@ function FreeGangs.Client.Territory.OnEnterZone(zoneName, config)
     local playerGang = FreeGangs.Client.PlayerGang
     if playerGang and owner and owner ~= playerGang.name then
         -- Check heat stage with rival
-        -- STUB: Replace when Heat Phase complete
-        -- local heatStage = FreeGangs.Client.Heat.GetStage(playerGang.name, owner)
-        -- TODO: STUB - Replace with FreeGangs.Client.Heat.GetStage()
-        local heatStage = 'neutral'
+        local heatInfo = FreeGangs.Client.Cache.GetHeat(owner)
+        local heatStage = heatInfo and heatInfo.stage or 'neutral'
         
         if heatStage == 'cold_war' or heatStage == 'rivalry' or heatStage == 'war_ready' then
             FreeGangs.Bridge.Notify('Warning: You are in hostile territory!', 'warning', 5000)

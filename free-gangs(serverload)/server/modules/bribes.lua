@@ -675,9 +675,11 @@ function FreeGangs.Server.Bribes.UseAbility(source, contactType, abilityName, pa
         -- Add heat
         local contactInfo = FreeGangs.BribeContactInfo[contactType]
         if contactInfo and contactInfo.heatPerUse > 0 then
-            -- Add heat with any rival gangs in the area
-            -- STUB: Replace with actual Heat module when available
-            FreeGangs.Utils.Debug('Would add ' .. contactInfo.heatPerUse .. ' heat for bribe use')
+            -- Add heat with rival gangs in the area
+            local rivals = FreeGangs.Server.Heat.GetRivals(gangName)
+            for _, rivalGang in ipairs(rivals) do
+                FreeGangs.Server.Heat.Add(gangName, rivalGang, contactInfo.heatPerUse, 'bribe_use')
+            end
         end
         
         -- Log usage
@@ -762,8 +764,7 @@ function FreeGangs.Server.Bribes.AbilityDispatchRedirect(source, gangName, gang)
     -- Set cooldown
     FreeGangs.Server.SetCooldown(source, cooldownKey, config.cooldownSeconds)
     
-    -- Trigger redirect effect
-    -- STUB: This would integrate with a police dispatch system
+    -- Trigger dispatch redirect effect
     TriggerEvent('freegangs:server:dispatchRedirected', gangName, source)
     
     FreeGangs.Bridge.Notify(source, FreeGangs.Locale('bribes.dispatch_redirected'), 'success')
@@ -823,8 +824,9 @@ function FreeGangs.Server.Bribes.AbilityReduceSentence(source, gangName, gang, p
     gang.treasury = gang.treasury - cost
     FreeGangs.Server.Cache.MarkDirty('gang', gangName)
     
-    -- STUB: This would integrate with a prison system to reduce sentence
+    -- Reduce sentence via Prison module
     TriggerEvent('freegangs:server:reduceSentence', targetCitizenid, minutesToReduce)
+    FreeGangs.Server.Prison.AddInfluence(gangName, 1, 'Bribe: sentence reduction')
     
     FreeGangs.Bridge.Notify(source, string.format(FreeGangs.Locale('bribes.sentence_reduced'), minutesToReduce), 'success')
     
@@ -860,8 +862,10 @@ function FreeGangs.Server.Bribes.AbilityImmediateRelease(source, gangName, gang,
     -- Set cooldown
     FreeGangs.Server.SetCooldown(source, cooldownKey, config.cooldownSeconds)
     
-    -- STUB: This would integrate with a prison system to release player
+    -- Release prisoner via Prison module
     TriggerEvent('freegangs:server:releasePrisoner', targetCitizenid)
+    FreeGangs.Server.Prison.UnregisterJailedMember(targetCitizenid, gangName)
+    FreeGangs.Server.Prison.AddInfluence(gangName, 2, 'Bribe: prisoner release')
     
     FreeGangs.Bridge.Notify(source, FreeGangs.Locale('bribes.prisoner_released'), 'success')
     
@@ -932,8 +936,8 @@ function FreeGangs.Server.Bribes.AbilityContrabandDelivery(source, gangName, gan
     -- Set cooldown
     FreeGangs.Server.SetCooldown(source, cooldownKey, config.cooldownSeconds)
     
-    -- STUB: This would integrate with prison system to deliver items
-    TriggerEvent('freegangs:server:deliverContraband', targetCitizenid, items)
+    -- Deliver contraband via Prison module
+    FreeGangs.Server.Prison.DeliverContraband(source, targetCitizenid, items)
     
     FreeGangs.Bridge.Notify(source, FreeGangs.Locale('bribes.contraband_delivered'), 'success')
     
@@ -977,8 +981,8 @@ function FreeGangs.Server.Bribes.AbilityHelpEscape(source, gangName, gang, param
     -- Set cooldown
     FreeGangs.Server.SetCooldown(source, cooldownKey, config.cooldownSeconds)
     
-    -- STUB: This would integrate with prison system to break out player
-    TriggerEvent('freegangs:server:helpEscape', targetCitizenid)
+    -- Help escape via Prison module
+    FreeGangs.Server.Prison.HelpEscape(source, targetCitizenid)
     
     return true, { cost = cost }
 end
@@ -1058,36 +1062,18 @@ end
 ---@param gangName string
 ---@return number
 function FreeGangs.Server.Bribes.GetGangMaxHeat(gangName)
-    -- STUB: Replace with actual Heat module when available
-    -- For now, return 0
-    local maxHeat = 0
-    
-    if FreeGangs.Server.Heat then
-        for key, heat in pairs(FreeGangs.Server.Heat) do
-            if heat.gang_a == gangName or heat.gang_b == gangName then
-                if heat.heat_level > maxHeat then
-                    maxHeat = heat.heat_level
-                end
-            end
-        end
+    local records = FreeGangs.Server.Heat.GetGangHeat(gangName)
+    if records and #records > 0 then
+        return records[1].heat_level -- Already sorted descending
     end
-    
-    return maxHeat
+    return 0
 end
 
 ---Get gang's prison control percentage
 ---@param gangName string
 ---@return number
 function FreeGangs.Server.Bribes.GetPrisonControl(gangName)
-    -- STUB: Replace with actual Territory module when available
-    local prisonZone = FreeGangs.Config.Prison.ZoneName
-    
-    if FreeGangs.Server.Territories and FreeGangs.Server.Territories[prisonZone] then
-        local influence = FreeGangs.Server.Territories[prisonZone].influence
-        return influence and influence[gangName] or 0
-    end
-    
-    return 0
+    return FreeGangs.Server.Prison.GetControlLevel(gangName)
 end
 
 ---Get bribe cost for display (with all modifiers)
