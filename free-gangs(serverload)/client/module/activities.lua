@@ -1,0 +1,661 @@
+--[[
+    FREE-GANGS: Client Activities Module
+    
+    Handles client-side criminal activity interactions:
+    - ox_target integration for NPCs
+    - Progress bars and minigames
+    - Animations and effects
+    - UI feedback
+]]
+
+FreeGangs.Client = FreeGangs.Client or {}
+FreeGangs.Client.Activities = {}
+
+-- ============================================================================
+-- LOCAL STATE
+-- ============================================================================
+
+local isPerformingActivity = false
+local activityCooldowns = {}
+local targetingEnabled = false
+
+-- Weapon hashes for mugging requirement
+local mugWeaponClasses = {
+    [2] = true, -- Melee
+    [3] = true, -- Handguns
+    [4] = true, -- Submachine guns
+}
+
+-- ============================================================================
+-- UTILITY FUNCTIONS
+-- ============================================================================
+
+---Check if player is currently performing an activity
+---@return boolean
+function FreeGangs.Client.Activities.IsBusy()
+    return isPerformingActivity
+end
+
+---Set busy state
+---@param busy boolean
+local function SetBusy(busy)
+    isPerformingActivity = busy
+end
+
+---Check if player has a weapon that can be used for mugging
+---@return boolean
+local function HasMugWeapon()
+    local ped = FreeGangs.Client.GetPlayerPed()
+    local _, currentWeapon = GetCurrentPedWeapon(ped, true)
+    
+    if currentWeapon == 0 or currentWeapon == `WEAPON_UNARMED` then
+        return false
+    end
+    
+    -- Check weapon class
+    local weaponClass = GetWeapontypeGroup(currentWeapon)
+    
+    -- Allow specific weapon types
+    local allowedGroups = {
+        [`GROUP_PISTOL`] = true,
+        [`GROUP_SMG`] = true,
+        [`GROUP_MELEE`] = true,
+        [2685387236] = true, -- GROUP_PISTOL
+        [3337201093] = true, -- GROUP_SMG
+        [3566412244] = true, -- GROUP_MELEE
+    }
+    
+    return allowedGroups[weaponClass] or false
+end
+
+---Get current game hour
+---@return number
+local function GetGameHour()
+    return GetClockHours()
+end
+
+---Check if within drug sale hours
+---@return boolean
+local function IsDrugSaleTime()
+    local hour = GetGameHour()
+    local startHour = FreeGangs.Config.Activities.DrugSales.AllowedStartHour
+    local endHour = FreeGangs.Config.Activities.DrugSales.AllowedEndHour
+    
+    if startHour > endHour then
+        return hour >= startHour or hour < endHour
+    else
+        return hour >= startHour and hour < endHour
+    end
+end
+
+---Play animation
+---@param dict string Animation dictionary
+---@param anim string Animation name
+---@param duration number Duration in ms
+---@param flag number Animation flag
+local function PlayAnim(dict, anim, duration, flag)
+    local ped = FreeGangs.Client.GetPlayerPed()
+    
+    lib.requestAnimDict(dict)
+    TaskPlayAnim(ped, dict, anim, 8.0, -8.0, duration or -1, flag or 0, 0, false, false, false)
+end
+
+---Stop animation
+local function StopAnim()
+    local ped = FreeGangs.Client.GetPlayerPed()
+    ClearPedTasks(ped)
+end
+
+---Make NPC react
+---@param ped number NPC ped handle
+---@param reaction string Type of reaction
+local function TriggerNPCReaction(ped, reaction)
+    if not DoesEntityExist(ped) then return end
+    
+    if reaction == 'scared' then
+        -- Make NPC flee
+        ClearPedTasks(ped)
+        TaskReactAndFleePed(ped, PlayerPedId())
+        
+    elseif reaction == 'hands_up' then
+        -- Make NPC put hands up
+        ClearPedTasks(ped)
+        lib.requestAnimDict('missminuteman_1ig_2')
+        TaskPlayAnim(ped, 'missminuteman_1ig_2', 'handsup_base', 8.0, -8.0, -1, 49, 0, false, false, false)
+        
+    elseif reaction == 'aggressive' then
+        -- Make NPC attack
+        ClearPedTasks(ped)
+        TaskCombatPed(ped, PlayerPedId(), 0, 16)
+    end
+end
+
+-- ============================================================================
+-- MUGGING SYSTEM
+-- ============================================================================
+
+---Start mugging an NPC
+---@param targetPed number Target NPC ped handle
+function FreeGangs.Client.Activities.StartMugging(targetPed)
+    if isPerformingActivity then
+        FreeGangs.Bridge.Notify(FreeGangs.L('errors', 'generic'), 'error')
+        return
+    end
+    
+    -- Check weapon
+    if not HasMugWeapon() then
+        FreeGangs.Bridge.Notify(FreeGangs.L('activities', 'mugging_no_weapon'), 'error')
+        return
+    end
+    
+    -- Validate target with server
+    local targetNetId = NetworkGetNetworkIdFromEntity(targetPed)
+    local canMug, errorMsg = lib.callback.await('freegangs:activities:validateMugTarget', false, targetNetId)
+    
+    if not canMug then
+        FreeGangs.Bridge.Notify(errorMsg, 'error')
+        return
+    end
+    
+    SetBusy(true)
+    
+    -- Notify server of start
+    TriggerServerEvent('freegangs:server:startMugging', targetNetId)
+    
+    -- Make NPC react
+    TriggerNPCReaction(targetPed, 'hands_up')
+    
+    -- Face target
+    local ped = FreeGangs.Client.GetPlayerPed()
+    local targetCoords = GetEntityCoords(targetPed)
+    TaskTurnPedToFaceCoord(ped, targetCoords.x, targetCoords.y, targetCoords.z, 1000)
+    Wait(500)
+    
+    -- Play pointing animation
+    PlayAnim('mp_missheist_countrybank@aim', 'aim_loop', -1, 49)
+    
+    -- Progress bar
+    local success = lib.progressBar({
+        duration = 3000,
+        label = 'Mugging...',
+        useWhileDead = false,
+        canCancel = true,
+        disable = {
+            move = true,
+            car = true,
+            combat = true,
+        },
+        anim = {
+            dict = 'mp_missheist_countrybank@aim',
+            clip = 'aim_loop',
+            flag = 49,
+        },
+    })
+    
+    StopAnim()
+    
+    if success then
+        -- Complete mugging on server
+        local mugSuccess, message, rewards = lib.callback.await('freegangs:activities:completeMugging', false, targetNetId)
+        
+        if mugSuccess then
+            FreeGangs.Bridge.Notify(message, 'success')
+            
+            -- NPC flees after being mugged
+            TriggerNPCReaction(targetPed, 'scared')
+            
+            -- Show rewards
+            if rewards then
+                if rewards.rep and rewards.rep > 0 then
+                    FreeGangs.Bridge.Notify('+' .. rewards.rep .. ' reputation', 'inform', 3000)
+                end
+            end
+        else
+            FreeGangs.Bridge.Notify(message, 'error')
+        end
+    else
+        FreeGangs.Bridge.Notify('Mugging cancelled', 'warning')
+        -- NPC runs away if mugging cancelled
+        TriggerNPCReaction(targetPed, 'scared')
+    end
+    
+    SetBusy(false)
+end
+
+-- ============================================================================
+-- PICKPOCKETING SYSTEM
+-- ============================================================================
+
+---Start pickpocketing an NPC
+---@param targetPed number Target NPC ped handle
+function FreeGangs.Client.Activities.StartPickpocket(targetPed)
+    if isPerformingActivity then
+        FreeGangs.Bridge.Notify(FreeGangs.L('errors', 'generic'), 'error')
+        return
+    end
+    
+    local targetNetId = NetworkGetNetworkIdFromEntity(targetPed)
+    local canPickpocket, errorMsg = lib.callback.await('freegangs:activities:validatePickpocketTarget', false, targetNetId)
+    
+    if not canPickpocket then
+        FreeGangs.Bridge.Notify(errorMsg, 'error')
+        return
+    end
+    
+    SetBusy(true)
+    
+    TriggerServerEvent('freegangs:server:startPickpocket', targetNetId)
+    
+    local ped = FreeGangs.Client.GetPlayerPed()
+    local config = FreeGangs.Config.Activities.Pickpocket
+    local maxDistance = config.MaxDistance or 2.0
+    local rolls = config.LootRolls or 3
+    local successfulRolls = 0
+    
+    for roll = 1, rolls do
+        -- Check distance
+        local playerCoords = GetEntityCoords(ped)
+        local targetCoords = GetEntityCoords(targetPed)
+        local distance = #(playerCoords - targetCoords)
+        
+        if distance > maxDistance then
+            FreeGangs.Bridge.Notify(FreeGangs.L('activities', 'too_far'), 'error')
+            break
+        end
+        
+        -- Sneak animation
+        PlayAnim('anim@amb@clubhouse@tutorial@bkr_tut_ig3@', 'machinic_loop_mechandplayer', -1, 49)
+        
+        -- Progress bar with distance check
+        local success = lib.progressBar({
+            duration = 2000,
+            label = string.format('Pickpocketing (%d/%d)...', roll, rolls),
+            useWhileDead = false,
+            canCancel = true,
+            disable = {
+                move = true,
+                car = true,
+                combat = true,
+            },
+        })
+        
+        if not success then
+            StopAnim()
+            FreeGangs.Bridge.Notify('Pickpocket cancelled', 'warning')
+            break
+        end
+        
+        -- Recheck distance
+        playerCoords = GetEntityCoords(ped)
+        targetCoords = GetEntityCoords(targetPed)
+        distance = #(playerCoords - targetCoords)
+        
+        if distance > maxDistance then
+            -- Failed due to distance
+            StopAnim()
+            FreeGangs.Bridge.Notify(FreeGangs.L('activities', 'pickpocket_detected'), 'error')
+            
+            -- NPC reacts aggressively
+            TriggerNPCReaction(targetPed, 'aggressive')
+            
+            -- Report failure to server
+            lib.callback.await('freegangs:activities:completePickpocket', false, targetNetId, false)
+            
+            SetBusy(false)
+            return
+        end
+        
+        successfulRolls = successfulRolls + 1
+    end
+    
+    StopAnim()
+    
+    if successfulRolls > 0 then
+        -- Complete pickpocket on server
+        local pickSuccess, message, rewards = lib.callback.await('freegangs:activities:completePickpocket', false, targetNetId, true)
+        
+        if pickSuccess then
+            FreeGangs.Bridge.Notify(message, 'success')
+        else
+            FreeGangs.Bridge.Notify(message, 'error')
+            
+            -- Detection
+            if rewards and rewards.detected then
+                TriggerNPCReaction(targetPed, 'aggressive')
+            end
+        end
+    end
+    
+    SetBusy(false)
+end
+
+-- ============================================================================
+-- DRUG SALES SYSTEM
+-- ============================================================================
+
+---Start drug sale to NPC
+---@param targetPed number Target NPC ped handle
+function FreeGangs.Client.Activities.StartDrugSale(targetPed)
+    if isPerformingActivity then
+        FreeGangs.Bridge.Notify(FreeGangs.L('errors', 'generic'), 'error')
+        return
+    end
+    
+    -- Check time restriction
+    if not IsDrugSaleTime() then
+        FreeGangs.Bridge.Notify(FreeGangs.L('activities', 'drug_sale_wrong_time'), 'error')
+        return
+    end
+    
+    -- Get player's drug inventory
+    local drugInventory = lib.callback.await('freegangs:activities:getDrugInventory', false)
+    
+    if not drugInventory or #drugInventory == 0 then
+        FreeGangs.Bridge.Notify(FreeGangs.L('activities', 'drug_sale_no_product'), 'error')
+        return
+    end
+    
+    -- If only one drug, sell it directly
+    local selectedDrug
+    local selectedQuantity = 1
+    
+    if #drugInventory == 1 then
+        selectedDrug = drugInventory[1]
+    else
+        -- Show drug selection menu
+        local options = {}
+        for _, drug in pairs(drugInventory) do
+            options[#options + 1] = {
+                title = drug.label,
+                description = 'You have: ' .. drug.count,
+                icon = 'cannabis',
+                onSelect = function()
+                    selectedDrug = drug
+                end,
+            }
+        end
+        
+        lib.registerContext({
+            id = 'freegangs_drug_select',
+            title = 'Select Product',
+            options = options,
+        })
+        
+        lib.showContext('freegangs_drug_select')
+        
+        -- Wait for selection
+        while lib.getOpenContextMenu() == 'freegangs_drug_select' do
+            Wait(100)
+        end
+        
+        if not selectedDrug then
+            return
+        end
+    end
+    
+    SetBusy(true)
+    
+    local targetNetId = NetworkGetNetworkIdFromEntity(targetPed)
+    TriggerServerEvent('freegangs:server:startDrugSale', targetNetId)
+    
+    -- Face target
+    local ped = FreeGangs.Client.GetPlayerPed()
+    local targetCoords = GetEntityCoords(targetPed)
+    TaskTurnPedToFaceCoord(ped, targetCoords.x, targetCoords.y, targetCoords.z, 1000)
+    Wait(500)
+    
+    -- Handshake animation
+    PlayAnim('mp_common', 'givetake1_a', 2000, 49)
+    
+    local success = lib.progressBar({
+        duration = 2500,
+        label = 'Making the sale...',
+        useWhileDead = false,
+        canCancel = true,
+        disable = {
+            move = true,
+            car = true,
+            combat = true,
+        },
+    })
+    
+    StopAnim()
+    
+    if success then
+        local saleSuccess, message, rewards = lib.callback.await(
+            'freegangs:activities:completeDrugSale', 
+            false, 
+            targetNetId, 
+            selectedDrug.item, 
+            selectedQuantity
+        )
+        
+        if saleSuccess then
+            FreeGangs.Bridge.Notify(message, 'success')
+            
+            if rewards then
+                if rewards.rep and rewards.rep > 0 then
+                    FreeGangs.Bridge.Notify('+' .. rewards.rep .. ' reputation', 'inform', 3000)
+                end
+            end
+        else
+            FreeGangs.Bridge.Notify(message, 'error')
+        end
+    else
+        FreeGangs.Bridge.Notify('Sale cancelled', 'warning')
+    end
+    
+    SetBusy(false)
+end
+
+-- ============================================================================
+-- PROTECTION RACKET SYSTEM
+-- ============================================================================
+
+---Open protection collection menu for current location
+function FreeGangs.Client.Activities.OpenProtectionMenu()
+    if isPerformingActivity then return end
+    
+    -- Get protection businesses
+    local businesses = lib.callback.await(FreeGangs.Callbacks.GET_PROTECTION_BUSINESSES, false)
+    
+    if not businesses or #businesses == 0 then
+        FreeGangs.Bridge.Notify('No protection businesses registered', 'inform')
+        return
+    end
+    
+    local options = {}
+    
+    for _, business in pairs(businesses) do
+        local status = business.isReady and '^2Ready^7' or '^1' .. FreeGangs.Utils.FormatDuration(business.timeRemaining * 1000) .. '^7'
+        
+        options[#options + 1] = {
+            title = business.business_label or business.business_id,
+            description = 'Base payout: $' .. business.payout_base .. ' | Status: ' .. status,
+            icon = business.isReady and 'hand-holding-dollar' or 'clock',
+            disabled = not business.isReady,
+            onSelect = function()
+                FreeGangs.Client.Activities.CollectProtection(business)
+            end,
+        }
+    end
+    
+    lib.registerContext({
+        id = 'freegangs_protection_menu',
+        title = 'Protection Racket',
+        options = options,
+    })
+    
+    lib.showContext('freegangs_protection_menu')
+end
+
+---Collect protection from a business
+---@param business table Business data
+function FreeGangs.Client.Activities.CollectProtection(business)
+    if isPerformingActivity then return end
+    
+    SetBusy(true)
+    
+    -- Animation
+    PlayAnim('anim@amb@nightclub@mini@drinking@drinking_shots@ped_a@', 'idle_a', 3000, 49)
+    
+    local success = lib.progressBar({
+        duration = 3000,
+        label = 'Collecting protection...',
+        useWhileDead = false,
+        canCancel = true,
+        disable = {
+            move = true,
+            car = true,
+            combat = true,
+        },
+    })
+    
+    StopAnim()
+    
+    if success then
+        local collectSuccess, message, rewards = lib.callback.await(
+            'freegangs:activities:collectProtection', 
+            false, 
+            business.business_id
+        )
+        
+        if collectSuccess then
+            FreeGangs.Bridge.Notify(message, 'success')
+            
+            if rewards then
+                if rewards.rep and rewards.rep > 0 then
+                    FreeGangs.Bridge.Notify('+' .. rewards.rep .. ' reputation', 'inform', 3000)
+                end
+            end
+        else
+            FreeGangs.Bridge.Notify(message, 'error')
+        end
+    else
+        FreeGangs.Bridge.Notify('Collection cancelled', 'warning')
+    end
+    
+    SetBusy(false)
+end
+
+-- ============================================================================
+-- OX_TARGET INTEGRATION
+-- ============================================================================
+
+---Setup ox_target options for NPCs
+function FreeGangs.Client.Activities.SetupTargeting()
+    if targetingEnabled then return end
+    
+    -- Add global ped targeting options
+    exports.ox_target:addGlobalPed({
+        -- Mugging option
+        {
+            name = 'freegangs_mug',
+            icon = 'fa-solid fa-gun',
+            label = 'Mug',
+            canInteract = function(entity, distance, coords, name, bone)
+                if not FreeGangs.Client.PlayerGang then return false end
+                if isPerformingActivity then return false end
+                if not HasMugWeapon() then return false end
+                if IsPedAPlayer(entity) then return false end
+                if IsPedDeadOrDying(entity) then return false end
+                return true
+            end,
+            onSelect = function(data)
+                FreeGangs.Client.Activities.StartMugging(data.entity)
+            end,
+            distance = FreeGangs.Config.Activities.Mugging.MaxDistance or 5.0,
+        },
+        
+        -- Pickpocketing option
+        {
+            name = 'freegangs_pickpocket',
+            icon = 'fa-solid fa-hand',
+            label = 'Pickpocket',
+            canInteract = function(entity, distance, coords, name, bone)
+                if not FreeGangs.Client.PlayerGang then return false end
+                if isPerformingActivity then return false end
+                if IsPedAPlayer(entity) then return false end
+                if IsPedDeadOrDying(entity) then return false end
+                -- Check if NPC is facing away (for stealth)
+                local ped = FreeGangs.Client.GetPlayerPed()
+                local pedHeading = GetEntityHeading(ped)
+                local npcHeading = GetEntityHeading(entity)
+                local headingDiff = math.abs(pedHeading - npcHeading)
+                -- Must be behind the NPC (heading difference ~180)
+                return headingDiff > 120 and headingDiff < 240
+            end,
+            onSelect = function(data)
+                FreeGangs.Client.Activities.StartPickpocket(data.entity)
+            end,
+            distance = FreeGangs.Config.Activities.Pickpocket.MaxDistance or 2.0,
+        },
+        
+        -- Drug sale option
+        {
+            name = 'freegangs_drugsale',
+            icon = 'fa-solid fa-pills',
+            label = 'Sell Drugs',
+            canInteract = function(entity, distance, coords, name, bone)
+                if not FreeGangs.Client.PlayerGang then return false end
+                if isPerformingActivity then return false end
+                if IsPedAPlayer(entity) then return false end
+                if IsPedDeadOrDying(entity) then return false end
+                if not IsDrugSaleTime() then return false end
+                return true
+            end,
+            onSelect = function(data)
+                FreeGangs.Client.Activities.StartDrugSale(data.entity)
+            end,
+            distance = 3.0,
+        },
+    })
+    
+    targetingEnabled = true
+    FreeGangs.Utils.Debug('Activity targeting enabled')
+end
+
+---Remove targeting options
+function FreeGangs.Client.Activities.RemoveTargeting()
+    if not targetingEnabled then return end
+    
+    exports.ox_target:removeGlobalPed({
+        'freegangs_mug',
+        'freegangs_pickpocket',
+        'freegangs_drugsale',
+    })
+    
+    targetingEnabled = false
+    FreeGangs.Utils.Debug('Activity targeting disabled')
+end
+
+-- ============================================================================
+-- INITIALIZATION
+-- ============================================================================
+
+---Initialize activities module
+function FreeGangs.Client.Activities.Initialize()
+    -- Setup targeting when player is in a gang
+    if FreeGangs.Client.PlayerGang then
+        FreeGangs.Client.Activities.SetupTargeting()
+    end
+end
+
+-- Auto-initialize when gang status changes
+AddEventHandler(FreeGangs.Events.Client.UPDATE_GANG_DATA, function(data)
+    if data and data.gang then
+        FreeGangs.Client.Activities.SetupTargeting()
+    else
+        FreeGangs.Client.Activities.RemoveTargeting()
+    end
+end)
+
+-- Initialize on resource start if already in gang
+CreateThread(function()
+    Wait(2000)
+    if FreeGangs.Client.PlayerGang then
+        FreeGangs.Client.Activities.SetupTargeting()
+    end
+end)
+
+return FreeGangs.Client.Activities

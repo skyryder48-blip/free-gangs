@@ -1,0 +1,286 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FREE-GANGS - Gang Operations</title>
+    <link rel="stylesheet" href="css/style.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;500;600;700&family=Crimson+Text:ital,wght@0,400;0,600;1,400&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+</head>
+<body>
+    <!-- Main Container -->
+    <div id="gang-ui" class="hidden">
+        <!-- Header Bar -->
+        <header class="gang-header">
+            <div class="header-left">
+                <div class="gang-emblem" id="gangEmblem">
+                    <i class="fas fa-skull"></i>
+                </div>
+                <div class="gang-info">
+                    <h1 class="gang-name" id="gangName">Gang Operations</h1>
+                    <span class="gang-archetype" id="gangArchetype">Organization</span>
+                </div>
+            </div>
+            <div class="header-right">
+                <div class="stat-badge">
+                    <i class="fas fa-star"></i>
+                    <span id="gangLevel">Level 1</span>
+                </div>
+                <div class="stat-badge treasury">
+                    <i class="fas fa-coins"></i>
+                    <span id="gangTreasury">$0</span>
+                </div>
+                <button class="close-btn" id="closeBtn">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+        </header>
+
+        <!-- Navigation Tabs -->
+        <nav class="gang-nav">
+            <button class="nav-tab active" data-tab="dashboard">
+                <i class="fas fa-tachometer-alt"></i>
+                <span>Dashboard</span>
+            </button>
+            <button class="nav-tab" data-tab="members">
+                <i class="fas fa-users"></i>
+                <span>Members</span>
+            </button>
+            <button class="nav-tab" data-tab="territories">
+                <i class="fas fa-map-marked-alt"></i>
+                <span>Territories</span>
+            </button>
+            <button class="nav-tab" data-tab="wars">
+                <i class="fas fa-crosshairs"></i>
+                <span>Wars</span>
+            </button>
+            <button class="nav-tab" data-tab="treasury">
+                <i class="fas fa-vault"></i>
+                <span>Treasury</span>
+            </button>
+        </nav>
+
+        <!-- Content Area -->
+        <main class="gang-content">
+            <!-- Dashboard Tab -->
+            <section class="tab-content active" id="dashboard-tab">
+                <div class="dashboard-grid">
+                    <!-- Stats Cards -->
+                    <div class="stat-card">
+                        <div class="stat-icon">
+                            <i class="fas fa-trophy"></i>
+                        </div>
+                        <div class="stat-info">
+                            <span class="stat-label">Reputation</span>
+                            <span class="stat-value" id="statRep">0</span>
+                        </div>
+                        <div class="stat-progress">
+                            <div class="progress-bar" id="repProgress" style="width: 0%"></div>
+                        </div>
+                    </div>
+
+                    <div class="stat-card">
+                        <div class="stat-icon">
+                            <i class="fas fa-users"></i>
+                        </div>
+                        <div class="stat-info">
+                            <span class="stat-label">Members</span>
+                            <span class="stat-value" id="statMembers">0</span>
+                        </div>
+                        <div class="stat-detail">
+                            <span id="membersOnline">0</span> online
+                        </div>
+                    </div>
+
+                    <div class="stat-card">
+                        <div class="stat-icon">
+                            <i class="fas fa-map"></i>
+                        </div>
+                        <div class="stat-info">
+                            <span class="stat-label">Territories</span>
+                            <span class="stat-value" id="statTerritories">0</span>
+                        </div>
+                        <div class="stat-detail">
+                            <span id="maxTerritories">0</span> max
+                        </div>
+                    </div>
+
+                    <div class="stat-card">
+                        <div class="stat-icon heat">
+                            <i class="fas fa-fire"></i>
+                        </div>
+                        <div class="stat-info">
+                            <span class="stat-label">Active Rivalries</span>
+                            <span class="stat-value" id="statRivalries">0</span>
+                        </div>
+                    </div>
+
+                    <!-- Recent Activity Feed -->
+                    <div class="activity-feed">
+                        <h3><i class="fas fa-clock"></i> Recent Activity</h3>
+                        <ul id="activityList">
+                            <li class="activity-item">
+                                <span class="activity-icon"><i class="fas fa-check-circle"></i></span>
+                                <span class="activity-text">No recent activity</span>
+                                <span class="activity-time">-</span>
+                            </li>
+                        </ul>
+                    </div>
+
+                    <!-- Quick Actions -->
+                    <div class="quick-actions">
+                        <h3><i class="fas fa-bolt"></i> Quick Actions</h3>
+                        <div class="action-buttons">
+                            <button class="action-btn" id="btnInvite">
+                                <i class="fas fa-user-plus"></i>
+                                Invite Member
+                            </button>
+                            <button class="action-btn" id="btnDeposit">
+                                <i class="fas fa-money-bill-wave"></i>
+                                Deposit
+                            </button>
+                            <button class="action-btn" id="btnStash">
+                                <i class="fas fa-box"></i>
+                                Open Stash
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Members Tab -->
+            <section class="tab-content" id="members-tab">
+                <div class="members-header">
+                    <h2>Member Roster</h2>
+                    <div class="member-search">
+                        <i class="fas fa-search"></i>
+                        <input type="text" id="memberSearch" placeholder="Search members...">
+                    </div>
+                </div>
+                <div class="members-list" id="membersList">
+                    <!-- Members will be populated dynamically -->
+                </div>
+            </section>
+
+            <!-- Territories Tab -->
+            <section class="tab-content" id="territories-tab">
+                <div class="territories-header">
+                    <h2>Territory Control</h2>
+                    <div class="territory-legend">
+                        <span class="legend-item controlled"><i class="fas fa-crown"></i> Controlled</span>
+                        <span class="legend-item contested"><i class="fas fa-exclamation-triangle"></i> Contested</span>
+                        <span class="legend-item neutral"><i class="fas fa-flag"></i> Neutral</span>
+                    </div>
+                </div>
+                <div class="territories-grid" id="territoriesList">
+                    <!-- Territories will be populated dynamically -->
+                </div>
+            </section>
+
+            <!-- Wars Tab -->
+            <section class="tab-content" id="wars-tab">
+                <div class="wars-section">
+                    <h2><i class="fas fa-skull-crossbones"></i> Active Wars</h2>
+                    <div class="wars-list" id="activeWarsList">
+                        <!-- Active wars will be populated dynamically -->
+                        <div class="no-wars">
+                            <i class="fas fa-peace"></i>
+                            <p>No active wars</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="heat-section">
+                    <h2><i class="fas fa-fire"></i> Heat Levels</h2>
+                    <div class="heat-list" id="heatList">
+                        <!-- Heat levels will be populated dynamically -->
+                    </div>
+                </div>
+            </section>
+
+            <!-- Treasury Tab -->
+            <section class="tab-content" id="treasury-tab">
+                <div class="treasury-overview">
+                    <div class="treasury-card main">
+                        <div class="treasury-icon">
+                            <i class="fas fa-vault"></i>
+                        </div>
+                        <div class="treasury-info">
+                            <span class="treasury-label">Gang Treasury</span>
+                            <span class="treasury-amount" id="treasuryBalance">$0</span>
+                        </div>
+                        <div class="treasury-actions">
+                            <button class="btn-deposit" id="btnTreasuryDeposit">
+                                <i class="fas fa-arrow-down"></i> Deposit
+                            </button>
+                            <button class="btn-withdraw" id="btnTreasuryWithdraw">
+                                <i class="fas fa-arrow-up"></i> Withdraw
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="treasury-card war-chest">
+                        <div class="treasury-icon">
+                            <i class="fas fa-crosshairs"></i>
+                        </div>
+                        <div class="treasury-info">
+                            <span class="treasury-label">War Chest</span>
+                            <span class="treasury-amount" id="warChestBalance">$0</span>
+                        </div>
+                        <div class="treasury-actions">
+                            <button class="btn-deposit" id="btnWarChestDeposit">
+                                <i class="fas fa-arrow-down"></i> Deposit
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="transaction-history">
+                    <h3><i class="fas fa-receipt"></i> Transaction History</h3>
+                    <ul id="transactionList">
+                        <li class="transaction-item">
+                            <span class="no-transactions">No recent transactions</span>
+                        </li>
+                    </ul>
+                </div>
+            </section>
+        </main>
+
+        <!-- Footer -->
+        <footer class="gang-footer">
+            <span class="footer-text">
+                <i class="fas fa-skull"></i> 
+                The family that rules together, stays together.
+            </span>
+            <span class="version">v1.0.0</span>
+        </footer>
+    </div>
+
+    <!-- Modal Overlay -->
+    <div id="modalOverlay" class="modal-overlay hidden">
+        <div class="modal" id="modal">
+            <div class="modal-header">
+                <h3 id="modalTitle">Modal Title</h3>
+                <button class="modal-close" id="modalClose">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="modal-body" id="modalBody">
+                <!-- Modal content -->
+            </div>
+            <div class="modal-footer" id="modalFooter">
+                <button class="modal-btn cancel" id="modalCancel">Cancel</button>
+                <button class="modal-btn confirm" id="modalConfirm">Confirm</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast Container -->
+    <div id="toastContainer" class="toast-container"></div>
+
+    <script src="js/app.js"></script>
+</body>
+</html>
