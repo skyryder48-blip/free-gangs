@@ -2899,6 +2899,105 @@ function FreeGangs.Server.Archetypes.CrimeFamily.GetExtortionBonusInfo(gangName)
 end
 
 -- ============================================================================
+-- CRIME FAMILY: TRIBUTE NETWORK (TIER 1) - ACTIVE ABILITY
+-- Crime families collect a cut from NPC sales in controlled zones
+-- ============================================================================
+
+---Get tribute cut percentage for a zone based on gang influence
+---@param gangName string
+---@param zoneName string
+---@return number cutPercent (0.0 to 0.05)
+function FreeGangs.Server.Archetypes.CrimeFamily.GetTributeCut(gangName, zoneName)
+    local gang = FreeGangs.Server.Gangs[gangName]
+    if not gang or gang.archetype ~= FreeGangs.Archetypes.CRIME_FAMILY then
+        return 0
+    end
+
+    if not FreeGangs.Server.Archetypes.HasTierAccess(gangName, 1) then
+        return 0
+    end
+
+    local influence = FreeGangs.Server.Territory.GetInfluence(zoneName, gangName)
+    if influence < 25 then
+        return 0
+    end
+
+    -- Base 5% cut, scaled by influence above 25%
+    local baseCut = 0.05
+    local influenceScale = math.min(1.0, (influence - 25) / 75)
+    return baseCut * (0.5 + 0.5 * influenceScale)
+end
+
+---Collect tribute from controlled zones
+---@param source number
+---@param gangName string
+---@param params table
+---@return boolean, string|nil
+function FreeGangs.Server.Archetypes.CrimeFamily.CollectTribute(source, gangName, params)
+    local gang = FreeGangs.Server.Gangs[gangName]
+    if not gang or gang.archetype ~= FreeGangs.Archetypes.CRIME_FAMILY then
+        return false, 'Only Crime Families can collect tribute'
+    end
+
+    if not FreeGangs.Server.Archetypes.HasTierAccess(gangName, 1) then
+        return false, 'Requires Master Level 4'
+    end
+
+    -- Check cooldown
+    local cooldownKey = gangName .. '_tribute_collection'
+    if FreeGangs.Server.IsOnCooldown(source, cooldownKey) then
+        local _, remaining = FreeGangs.Server.IsOnCooldown(source, cooldownKey)
+        return false, 'Tribute collection on cooldown (' .. FreeGangs.Utils.FormatDuration(remaining * 1000) .. ')'
+    end
+
+    -- Calculate tribute from all controlled zones
+    local totalTribute = 0
+    local zoneCount = 0
+    local territories = FreeGangs.Server.Territory.GetAll()
+
+    for zoneName, territory in pairs(territories) do
+        local cut = FreeGangs.Server.Archetypes.CrimeFamily.GetTributeCut(gangName, zoneName)
+        if cut > 0 then
+            local zoneValue = territory.protectionValue or 500
+            local tribute = math.floor(zoneValue * cut)
+            totalTribute = totalTribute + tribute
+            zoneCount = zoneCount + 1
+        end
+    end
+
+    if totalTribute <= 0 then
+        return false, 'No controlled zones to collect tribute from (need 25%+ influence)'
+    end
+
+    -- Apply extortion bonus if available
+    if FreeGangs.Server.Archetypes.CrimeFamily.HasExtortionBonus(gangName) then
+        totalTribute = FreeGangs.Server.Archetypes.CrimeFamily.ApplyExtortionPayoutBonus(gangName, totalTribute)
+    end
+
+    -- Deposit into treasury
+    gang.treasury = (gang.treasury or 0) + totalTribute
+    FreeGangs.Server.Cache.MarkDirty('gang', gangName)
+
+    -- Set cooldown
+    local cooldownSeconds = FreeGangs.Config.Cooldowns.tribute_collection or 3600
+    FreeGangs.Server.SetCooldown(source, cooldownKey, cooldownSeconds)
+
+    -- Add reputation
+    local repGain = math.floor(5 * zoneCount)
+    FreeGangs.Server.Reputation.Add(gangName, repGain, 'Tribute collection')
+
+    -- Log
+    local citizenid = FreeGangs.Bridge.GetCitizenId(source)
+    FreeGangs.Server.DB.Log(gangName, citizenid, 'tribute_collected', FreeGangs.LogCategories.ACTIVITY, {
+        zones = zoneCount,
+        amount = totalTribute,
+        repGain = repGain,
+    })
+
+    return true, 'Collected $' .. FreeGangs.Utils.FormatMoney(totalTribute) .. ' tribute from ' .. zoneCount .. ' zone(s)'
+end
+
+-- ============================================================================
 -- CRIME FAMILY: HIGH-VALUE CONTRACTS (TIER 2)
 -- ============================================================================
 
