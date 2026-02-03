@@ -191,24 +191,17 @@ function FreeGangs.Client.Territory.OnEnterZone(zoneName, config)
     
     -- Notify server
     TriggerServerEvent(FreeGangs.Events.Server.ENTER_TERRITORY, zoneName)
-    
-    -- Show entry notification
+
+    -- Show entry notification only for territories controlled by a gang (>50%)
     local owner = currentZone.owner
-    local notifyMessage
-    
+
     if owner then
         local gangData = FreeGangs.Client.Cache.Get('gangs') or {}
         local gangLabel = gangData[owner] and gangData[owner].label or owner
-        notifyMessage = string.format(FreeGangs.Config.Messages.TerritoryEntered, gangLabel .. ' territory')
-    else
-        notifyMessage = string.format(FreeGangs.Config.Messages.TerritoryEntered, config.label or zoneName)
+        FreeGangs.Bridge.Notify(string.format(FreeGangs.Config.Messages.TerritoryEntered, gangLabel .. ' territory'), 'inform', 3000)
     end
-    
-    if FreeGangs.Config.UI.ShowTerritoryHUD then
-        FreeGangs.Bridge.Notify(notifyMessage, 'inform', 3000)
-    end
-    
-    -- Check if entering rival territory
+
+    -- Check if entering rival territory (gang members only)
     local playerGang = FreeGangs.Client.PlayerGang
     if playerGang and owner and owner ~= playerGang.name then
         -- Check heat stage with rival
@@ -516,9 +509,11 @@ function FreeGangs.Client.Territory.StartStateListener()
                 FreeGangs.Client.Territory.UpdateHUDState(zoneName)
             end
             
-            -- Update blip color
-            FreeGangs.Client.Territory.UpdateBlipColor(zoneName)
-            
+            -- Update blip color (only if blips are enabled)
+            if FreeGangs.Config.TerritoryVisuals and FreeGangs.Config.TerritoryVisuals.Blips.Enabled then
+                FreeGangs.Client.Territory.UpdateBlipColor(zoneName)
+            end
+
             FreeGangs.Utils.Debug('Territory state updated:', zoneName)
         end
     end)
