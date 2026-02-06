@@ -78,11 +78,11 @@ client_scripts {
     'client/cache.lua',
     
     -- Feature modules
-    'client/modules/territory.lua',
-    'client/modules/activities.lua',
-    'client/modules/graffiti.lua',
-    'client/modules/bribes.lua',
-    'client/modules/archetypes.lua',
+    'client/module/territory.lua',
+    'client/module/activities.lua',
+    'client/module/graffiti.lua',
+    'client/module/bribes.lua',
+    'client/module/archetypes.lua',
     
     -- UI components
     'client/ui/menus.lua',

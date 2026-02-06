@@ -115,8 +115,7 @@ CREATE TABLE IF NOT EXISTS `freegangs_graffiti` (
     INDEX `idx_gang` (`gang_name`),
     INDEX `idx_zone` (`zone_name`),
     INDEX `idx_expires` (`expires_at`),
-    INDEX `idx_coords` ((CAST(`coords`->>'$.x' AS DECIMAL(10,2))), (CAST(`coords`->>'$.y' AS DECIMAL(10,2)))),
-    
+
     CONSTRAINT `fk_graffiti_gang` FOREIGN KEY (`gang_name`) 
         REFERENCES `freegangs_gangs`(`name`) ON DELETE CASCADE ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
