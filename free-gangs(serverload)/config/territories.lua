@@ -517,9 +517,9 @@ FreeGangs.Config.Territories = {
 -- ============================================================================
 
 FreeGangs.Config.TerritoryVisuals = {
-    -- Blip settings
+    -- Blip settings (disabled - territory should not appear on the pause map)
     Blips = {
-        Enabled = true,
+        Enabled = false,
         DefaultSprite = 310,
         DefaultScale = 0.8,
         DefaultAlpha = 180,
