@@ -961,4 +961,24 @@ FreeGangs.Exports = {
     'HasArchetypeAccess',
 }
 
+-- ============================================================================
+-- HELPER FUNCTIONS
+-- ============================================================================
+
+---Get default ranks for an archetype
+---@param archetype string
+---@return table<number, {name: string, isBoss: boolean, isOfficer: boolean}>
+function FreeGangs.GetDefaultRanks(archetype)
+    return FreeGangs.DefaultRanks[archetype] or FreeGangs.DefaultRanks[FreeGangs.Archetypes.STREET]
+end
+
+---Get max territories for a reputation level
+---@param level number
+---@return number
+function FreeGangs.GetMaxTerritories(level)
+    local levelData = FreeGangs.ReputationLevels[level]
+    if not levelData then return 1 end
+    return levelData.maxTerritories
+end
+
 return FreeGangs
