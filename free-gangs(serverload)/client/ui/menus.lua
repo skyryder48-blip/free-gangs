@@ -226,7 +226,7 @@ function FreeGangs.Client.UI.OpenDashboard()
             metadata = {
                 { label = 'Name', value = dashboardData.label },
                 { label = 'Type', value = archetypeInfo.label },
-                { label = 'Founded', value = dashboardData.created_at and os.date('%Y-%m-%d', dashboardData.created_at) or 'Unknown' },
+                { label = 'Founded', value = dashboardData.created_at and FreeGangs.Utils.FormatTime(dashboardData.created_at, '%Y-%m-%d') or 'Unknown' },
                 { label = 'Color', value = dashboardData.color or '#FFFFFF' },
             },
         },
@@ -344,7 +344,7 @@ function FreeGangs.Client.UI.OpenMemberRoster()
             icon = 'user',
             iconColor = isOnline and '#00FF00' or '#888888',
             metadata = {
-                { label = 'Joined', value = member.joined_at and os.date('%Y-%m-%d', member.joined_at) or 'Unknown' },
+                { label = 'Joined', value = member.joined_at and FreeGangs.Utils.FormatTime(member.joined_at, '%Y-%m-%d') or 'Unknown' },
                 { label = 'Individual Rep', value = FreeGangs.Utils.FormatNumber(member.individual_rep or 0) },
             },
         }
@@ -565,8 +565,8 @@ function FreeGangs.Client.UI.ShowTerritoryDetails(zoneName, territory)
     })
     
     -- Cooldown status
-    if territory.cooldown_until and territory.cooldown_until > os.time() then
-        local remaining = territory.cooldown_until - os.time()
+    if territory.cooldown_until and territory.cooldown_until > FreeGangs.Utils.GetTimestamp() then
+        local remaining = territory.cooldown_until - FreeGangs.Utils.GetTimestamp()
         table.insert(options, {
             title = 'Capture Cooldown',
             icon = 'clock',
@@ -720,7 +720,7 @@ function FreeGangs.Client.UI.OpenWarStatus()
                     { label = 'Our Kills', value = tostring(isAttacker and war.attacker_kills or war.defender_kills) },
                     { label = 'Their Kills', value = tostring(isAttacker and war.defender_kills or war.attacker_kills) },
                     { label = 'Collateral', value = FreeGangs.Utils.FormatMoney(war.collateral_amount) },
-                    { label = 'Started', value = war.started_at and os.date('%m/%d %H:%M', war.started_at) or 'Pending' },
+                    { label = 'Started', value = war.started_at and FreeGangs.Utils.FormatTime(war.started_at, '%m/%d %H:%M') or 'Pending' },
                 },
                 onSelect = function()
                     FreeGangs.Client.UI.ShowWarDetails(war)
@@ -809,7 +809,7 @@ function FreeGangs.Client.UI.ShowWarDetails(war)
             title = 'Duration',
             icon = 'clock',
             iconColor = '#888888',
-            description = war.started_at and FreeGangs.Utils.FormatDuration((os.time() - war.started_at) * 1000) or 'Not started',
+            description = war.started_at and FreeGangs.Utils.FormatDuration((FreeGangs.Utils.GetTimestamp() - war.started_at) * 1000) or 'Not started',
         },
     }
     
@@ -872,7 +872,7 @@ function FreeGangs.Client.UI.OpenBribesMenu()
             local contactInfo = FreeGangs.BribeContactInfo[contactType]
             if contactInfo then
                 local dueDate = bribe.next_payment_due
-                local isDue = dueDate and dueDate <= os.time() + 86400 -- Due within 24h
+                local isDue = dueDate and dueDate <= FreeGangs.Utils.GetTimestamp() + 86400 -- Due within 24h
                 
                 table.insert(options, {
                     title = contactInfo.label,
@@ -949,7 +949,7 @@ function FreeGangs.Client.UI.ShowBribeDetails(contactType, bribe)
             iconColor = FreeGangs.Config.UI.Theme.AccentColor,
             metadata = {
                 { label = 'Status', value = bribe.is_paused and 'Paused' or 'Active' },
-                { label = 'Established', value = bribe.established_at and os.date('%Y-%m-%d', bribe.established_at) or 'Unknown' },
+                { label = 'Established', value = bribe.established_at and FreeGangs.Utils.FormatTime(bribe.established_at, '%Y-%m-%d') or 'Unknown' },
                 { label = 'Missed Payments', value = tostring(bribe.missed_payments or 0) },
             },
         },
@@ -957,7 +957,7 @@ function FreeGangs.Client.UI.ShowBribeDetails(contactType, bribe)
     
     -- Payment option
     if bribe.next_payment_due then
-        local remaining = bribe.next_payment_due - os.time()
+        local remaining = bribe.next_payment_due - FreeGangs.Utils.GetTimestamp()
         table.insert(options, {
             title = 'Make Payment',
             description = remaining > 0 and 

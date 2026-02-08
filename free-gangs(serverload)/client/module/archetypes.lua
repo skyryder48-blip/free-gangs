@@ -362,7 +362,7 @@ function FreeGangs.Client.Archetypes.HandleDriveByContractStart(data)
         while activeActivities.driveByContract and 
               activeActivities.driveByContract.contractId == data.contractId do
             
-            local remaining = activeActivities.driveByContract.expiresAt - os.time()
+            local remaining = activeActivities.driveByContract.expiresAt - FreeGangs.Utils.GetTimestamp()
             
             if remaining <= 0 then
                 -- Time expired - server will handle failure
@@ -563,7 +563,7 @@ function FreeGangs.Client.Archetypes.HandleProspectRunStart(data)
         trapSpot = data.trapSpot,
         timeLimit = data.timeLimit,
         startTime = GetGameTimer(),
-        expiresAt = os.time() + data.timeLimit,
+        expiresAt = FreeGangs.Utils.GetTimestamp() + data.timeLimit,
         destinationAmbushChance = data.destinationAmbushChance,
         routeAmbushChance = data.routeAmbushChance,
         routeAmbushNPCCount = data.routeAmbushNPCCount,
@@ -627,7 +627,7 @@ function FreeGangs.Client.Archetypes.ProspectRunMonitorThread()
         local playerCoords = GetEntityCoords(playerPed)
         
         -- Check time remaining
-        local remaining = run.expiresAt - os.time()
+        local remaining = run.expiresAt - FreeGangs.Utils.GetTimestamp()
         if remaining <= 0 then
             FreeGangs.Client.Archetypes.FailProspectRun('Time expired')
             break
@@ -818,7 +818,7 @@ function FreeGangs.Client.Archetypes.HandleClubRunStart(data)
         destination = data.destination,
         timeLimit = data.timeLimit,
         startTime = GetGameTimer(),
-        expiresAt = os.time() + data.timeLimit,
+        expiresAt = FreeGangs.Utils.GetTimestamp() + data.timeLimit,
         destinationAmbushChance = data.destinationAmbushChance,
         routeAmbushChance = data.routeAmbushChance,
         routeAmbushNPCCount = data.routeAmbushNPCCount,
@@ -1210,7 +1210,7 @@ function FreeGangs.Client.Archetypes.HandleConvoyStart(data)
         destination = data.destination,
         timeLimit = data.timeLimit,
         startTime = GetGameTimer(),
-        expiresAt = os.time() + data.timeLimit,
+        expiresAt = FreeGangs.Utils.GetTimestamp() + data.timeLimit,
         destinationAmbushChance = data.destinationAmbushChance,
         hasRouteAmbush = data.hasRouteAmbush, -- Always false for Cartel
         atDestination = false,
@@ -1290,7 +1290,7 @@ function FreeGangs.Client.Archetypes.ConvoyMonitorThread()
         local playerCoords = GetEntityCoords(playerPed)
         
         -- Check time
-        local remaining = convoy.expiresAt - os.time()
+        local remaining = convoy.expiresAt - FreeGangs.Utils.GetTimestamp()
         if remaining <= 0 then
             FreeGangs.Bridge.Notify('Convoy time expired!', 'error')
             activeActivities.convoyProtection = nil
