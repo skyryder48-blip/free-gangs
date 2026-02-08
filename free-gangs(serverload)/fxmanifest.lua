@@ -54,7 +54,10 @@ server_scripts {
     'server/modules/archetypes.lua',
     'server/modules/prison.lua',
     
-    -- Callbacks (register after modules exist)
+    -- Core callbacks (gang data, members, validation)
+    'server/callbacks.lua',
+
+    -- Module callbacks (register after modules exist)
     'server/callbacks/territory.lua',
     'server/callbacks/heat.lua',
     'server/callbacks/war.lua',

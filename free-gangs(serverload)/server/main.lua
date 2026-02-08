@@ -573,6 +573,431 @@ AddEventHandler('onResourceStop', function(resourceName)
 end)
 
 -- ============================================================================
+-- CORE GANG EVENT HANDLERS
+-- ============================================================================
+
+-- Gang creation
+RegisterNetEvent(FreeGangs.Events.Server.CREATE_GANG, function(data)
+    local source = source
+    if not data or type(data) ~= 'table' then
+        FreeGangs.Bridge.Notify(source, 'Invalid gang creation data', 'error')
+        return
+    end
+
+    local success, result = FreeGangs.Server.Gang.Create(data, source)
+    if not success then
+        FreeGangs.Bridge.Notify(source, result or 'Failed to create gang', 'error')
+        return
+    end
+
+    -- Send updated gang data to the creator
+    local citizenid = FreeGangs.Bridge.GetCitizenId(source)
+    if citizenid then
+        local gangData = FreeGangs.Server.Gang.GetClientData(result)
+        local membership = FreeGangs.Server.DB.GetPlayerMembership(citizenid)
+        TriggerClientEvent(FreeGangs.Events.Client.UPDATE_GANG_DATA, source, {
+            gang = gangData,
+            membership = membership,
+        })
+    end
+end)
+
+-- Gang deletion (boss only)
+RegisterNetEvent(FreeGangs.Events.Server.DELETE_GANG, function()
+    local source = source
+    local citizenid = FreeGangs.Bridge.GetCitizenId(source)
+    if not citizenid then return end
+
+    local membership = FreeGangs.Server.DB.GetPlayerMembership(citizenid)
+    if not membership or not membership.is_boss then
+        FreeGangs.Bridge.Notify(source, FreeGangs.Config.Messages.NoPermission, 'error')
+        return
+    end
+
+    local success, err = FreeGangs.Server.Gang.Delete(membership.gang_name, 'Dissolved by boss')
+    if not success then
+        FreeGangs.Bridge.Notify(source, err or 'Failed to delete gang', 'error')
+    end
+end)
+
+-- Join gang (via invitation acceptance)
+RegisterNetEvent(FreeGangs.Events.Server.JOIN_GANG, function(gangName)
+    local source = source
+    if not gangName then return end
+
+    local citizenid = FreeGangs.Bridge.GetCitizenId(source)
+    if not citizenid then return end
+
+    local success, err = FreeGangs.Server.Member.Add(citizenid, gangName, 0)
+    if not success then
+        FreeGangs.Bridge.Notify(source, err or 'Failed to join gang', 'error')
+    end
+end)
+
+-- Leave gang
+RegisterNetEvent(FreeGangs.Events.Server.LEAVE_GANG, function()
+    local source = source
+    local citizenid = FreeGangs.Bridge.GetCitizenId(source)
+    if not citizenid then return end
+
+    local membership = FreeGangs.Server.DB.GetPlayerMembership(citizenid)
+    if not membership then
+        FreeGangs.Bridge.Notify(source, FreeGangs.Config.Messages.NotInGang, 'error')
+        return
+    end
+
+    local success, err = FreeGangs.Server.Member.Remove(citizenid, membership.gang_name, 'Left voluntarily')
+    if not success then
+        FreeGangs.Bridge.Notify(source, err or 'Failed to leave gang', 'error')
+    end
+end)
+
+-- Invite player
+RegisterNetEvent('free-gangs:server:invitePlayer', function(targetServerId)
+    local source = source
+    if not targetServerId then return end
+
+    local success, err = FreeGangs.Server.Member.Invite(source, tonumber(targetServerId))
+    if not success then
+        FreeGangs.Bridge.Notify(source, err or 'Failed to send invite', 'error')
+    end
+end)
+
+-- Kick member
+RegisterNetEvent(FreeGangs.Events.Server.KICK_MEMBER, function(targetCitizenid)
+    local source = source
+    if not targetCitizenid then return end
+
+    local success, err = FreeGangs.Server.Member.Kick(source, targetCitizenid)
+    if not success then
+        FreeGangs.Bridge.Notify(source, err or 'Failed to kick member', 'error')
+    end
+end)
+
+-- Promote member
+RegisterNetEvent(FreeGangs.Events.Server.PROMOTE_MEMBER, function(targetCitizenid)
+    local source = source
+    if not targetCitizenid then return end
+
+    local success, err = FreeGangs.Server.Member.Promote(source, targetCitizenid)
+    if not success then
+        FreeGangs.Bridge.Notify(source, err or 'Failed to promote member', 'error')
+    end
+end)
+
+-- Demote member
+RegisterNetEvent(FreeGangs.Events.Server.DEMOTE_MEMBER, function(targetCitizenid)
+    local source = source
+    if not targetCitizenid then return end
+
+    local success, err = FreeGangs.Server.Member.Demote(source, targetCitizenid)
+    if not success then
+        FreeGangs.Bridge.Notify(source, err or 'Failed to demote member', 'error')
+    end
+end)
+
+-- Treasury deposit
+RegisterNetEvent(FreeGangs.Events.Server.DEPOSIT_TREASURY, function(amount)
+    local source = source
+    amount = tonumber(amount)
+    if not amount or amount <= 0 then return end
+
+    local citizenid = FreeGangs.Bridge.GetCitizenId(source)
+    if not citizenid then return end
+
+    local membership = FreeGangs.Server.DB.GetPlayerMembership(citizenid)
+    if not membership then
+        FreeGangs.Bridge.Notify(source, FreeGangs.Config.Messages.NotInGang, 'error')
+        return
+    end
+
+    local success, err = FreeGangs.Server.Gang.DepositTreasury(membership.gang_name, source, amount)
+    if success then
+        FreeGangs.Bridge.Notify(source, 'Deposited ' .. FreeGangs.Utils.FormatMoney(amount) .. ' to treasury', 'success')
+        -- Update client gang data
+        TriggerClientEvent(FreeGangs.Events.Client.UPDATE_GANG_DATA, source, {
+            gang = FreeGangs.Server.Gang.GetClientData(membership.gang_name),
+            membership = FreeGangs.Server.DB.GetPlayerMembership(citizenid),
+        })
+    else
+        FreeGangs.Bridge.Notify(source, err or FreeGangs.Config.Messages.InsufficientFunds, 'error')
+    end
+end)
+
+-- Treasury withdrawal
+RegisterNetEvent(FreeGangs.Events.Server.WITHDRAW_TREASURY, function(amount)
+    local source = source
+    amount = tonumber(amount)
+    if not amount or amount <= 0 then return end
+
+    local citizenid = FreeGangs.Bridge.GetCitizenId(source)
+    if not citizenid then return end
+
+    local membership = FreeGangs.Server.DB.GetPlayerMembership(citizenid)
+    if not membership then
+        FreeGangs.Bridge.Notify(source, FreeGangs.Config.Messages.NotInGang, 'error')
+        return
+    end
+
+    -- Check permission
+    if not membership.is_boss and not FreeGangs.Server.Member.HasPermission(source, FreeGangs.Permissions.WITHDRAW_TREASURY) then
+        FreeGangs.Bridge.Notify(source, FreeGangs.Config.Messages.NoPermission, 'error')
+        return
+    end
+
+    local success, err = FreeGangs.Server.Gang.WithdrawTreasury(membership.gang_name, source, amount)
+    if success then
+        FreeGangs.Bridge.Notify(source, 'Withdrew ' .. FreeGangs.Utils.FormatMoney(amount) .. ' from treasury', 'success')
+        TriggerClientEvent(FreeGangs.Events.Client.UPDATE_GANG_DATA, source, {
+            gang = FreeGangs.Server.Gang.GetClientData(membership.gang_name),
+            membership = FreeGangs.Server.DB.GetPlayerMembership(citizenid),
+        })
+    else
+        FreeGangs.Bridge.Notify(source, err or FreeGangs.Config.Messages.InsufficientFunds, 'error')
+    end
+end)
+
+-- War chest deposit
+RegisterNetEvent(FreeGangs.Events.Server.DEPOSIT_WARCHEST, function(amount)
+    local source = source
+    amount = tonumber(amount)
+    if not amount or amount <= 0 then return end
+
+    local citizenid = FreeGangs.Bridge.GetCitizenId(source)
+    if not citizenid then return end
+
+    local membership = FreeGangs.Server.DB.GetPlayerMembership(citizenid)
+    if not membership then
+        FreeGangs.Bridge.Notify(source, FreeGangs.Config.Messages.NotInGang, 'error')
+        return
+    end
+
+    local success, err = FreeGangs.Server.Gang.DepositWarChest(membership.gang_name, source, amount)
+    if success then
+        FreeGangs.Bridge.Notify(source, 'Deposited ' .. FreeGangs.Utils.FormatMoney(amount) .. ' to war chest', 'success')
+        TriggerClientEvent(FreeGangs.Events.Client.UPDATE_GANG_DATA, source, {
+            gang = FreeGangs.Server.Gang.GetClientData(membership.gang_name),
+            membership = FreeGangs.Server.DB.GetPlayerMembership(citizenid),
+        })
+    else
+        FreeGangs.Bridge.Notify(source, err or FreeGangs.Config.Messages.InsufficientFunds, 'error')
+    end
+end)
+
+-- Open gang stash
+RegisterNetEvent(FreeGangs.Events.Server.OPEN_STASH, function()
+    local source = source
+    local citizenid = FreeGangs.Bridge.GetCitizenId(source)
+    if not citizenid then return end
+
+    local membership = FreeGangs.Server.DB.GetPlayerMembership(citizenid)
+    if not membership then
+        FreeGangs.Bridge.Notify(source, FreeGangs.Config.Messages.NotInGang, 'error')
+        return
+    end
+
+    if not FreeGangs.Server.Member.HasPermission(source, FreeGangs.Permissions.ACCESS_GANG_STASH) then
+        FreeGangs.Bridge.Notify(source, FreeGangs.Config.Messages.NoPermission, 'error')
+        return
+    end
+
+    local gang = FreeGangs.Server.Gangs[membership.gang_name]
+    if not gang then return end
+
+    local stashConfig = FreeGangs.Config.Stash.GangStash
+    local slots = stashConfig.BaseSlots + (stashConfig.SlotsPerLevel * (gang.master_level or 1))
+
+    exports.ox_inventory:openInventory(source, {
+        type = 'stash',
+        id = 'freegangs_' .. membership.gang_name,
+        label = gang.label .. ' Stash',
+        slots = slots,
+        weight = stashConfig.BaseWeight,
+    })
+end)
+
+-- Update gang color (boss only)
+RegisterNetEvent('free-gangs:server:updateGangColor', function(color)
+    local source = source
+    if not color then return end
+
+    local citizenid = FreeGangs.Bridge.GetCitizenId(source)
+    if not citizenid then return end
+
+    local membership = FreeGangs.Server.DB.GetPlayerMembership(citizenid)
+    if not membership or not membership.is_boss then
+        FreeGangs.Bridge.Notify(source, FreeGangs.Config.Messages.NoPermission, 'error')
+        return
+    end
+
+    local success = FreeGangs.Server.Gang.UpdateColor(membership.gang_name, color)
+    if success then
+        FreeGangs.Bridge.Notify(source, 'Gang color updated', 'success')
+    else
+        FreeGangs.Bridge.Notify(source, 'Invalid color', 'error')
+    end
+end)
+
+-- Update rank names (boss only)
+RegisterNetEvent('free-gangs:server:updateRankNames', function(rankNames)
+    local source = source
+    if not rankNames or type(rankNames) ~= 'table' then return end
+
+    local citizenid = FreeGangs.Bridge.GetCitizenId(source)
+    if not citizenid then return end
+
+    local membership = FreeGangs.Server.DB.GetPlayerMembership(citizenid)
+    if not membership or not membership.is_boss then
+        FreeGangs.Bridge.Notify(source, FreeGangs.Config.Messages.NoPermission, 'error')
+        return
+    end
+
+    for rankLevel, name in pairs(rankNames) do
+        if type(name) == 'string' and #name > 0 then
+            FreeGangs.Server.Gang.UpdateRankName(membership.gang_name, tonumber(rankLevel), name)
+        end
+    end
+
+    FreeGangs.Bridge.Notify(source, 'Rank names updated', 'success')
+end)
+
+-- Transfer leadership (boss only)
+RegisterNetEvent('free-gangs:server:transferLeadership', function(newLeaderCitizenid)
+    local source = source
+    if not newLeaderCitizenid then return end
+
+    local citizenid = FreeGangs.Bridge.GetCitizenId(source)
+    if not citizenid then return end
+
+    local membership = FreeGangs.Server.DB.GetPlayerMembership(citizenid)
+    if not membership or not membership.is_boss then
+        FreeGangs.Bridge.Notify(source, FreeGangs.Config.Messages.NoPermission, 'error')
+        return
+    end
+
+    local gangName = membership.gang_name
+    local gang = FreeGangs.Server.Gangs[gangName]
+    if not gang then return end
+
+    -- Verify new leader is in the same gang
+    local targetMembership = FreeGangs.Server.DB.GetPlayerMembership(newLeaderCitizenid)
+    if not targetMembership or targetMembership.gang_name ~= gangName then
+        FreeGangs.Bridge.Notify(source, 'Target is not in your gang', 'error')
+        return
+    end
+
+    local defaultRanks = FreeGangs.GetDefaultRanks(gang.archetype)
+    local bossRank = 5
+    local bossRankName = defaultRanks[bossRank] and defaultRanks[bossRank].name or 'Boss'
+    local officerRank = 4
+    local officerRankName = defaultRanks[officerRank] and defaultRanks[officerRank].name or 'Officer'
+
+    -- Promote new leader to boss
+    FreeGangs.Server.DB.UpdateMemberRank(newLeaderCitizenid, gangName, bossRank, bossRankName)
+    FreeGangs.Bridge.SetPlayerGangGrade(newLeaderCitizenid, gangName, bossRank)
+
+    -- Demote old leader to officer
+    FreeGangs.Server.DB.UpdateMemberRank(citizenid, gangName, officerRank, officerRankName)
+    FreeGangs.Bridge.SetPlayerGangGrade(citizenid, gangName, officerRank)
+
+    FreeGangs.Bridge.NotifyGang(gangName, 'Leadership has been transferred', 'inform')
+
+    -- Update both clients
+    TriggerClientEvent(FreeGangs.Events.Client.UPDATE_GANG_DATA, source, {
+        gang = FreeGangs.Server.Gang.GetClientData(gangName),
+        membership = FreeGangs.Server.DB.GetPlayerMembership(citizenid),
+    })
+
+    local newLeaderPlayer = FreeGangs.Bridge.GetPlayerByCitizenId(newLeaderCitizenid)
+    if newLeaderPlayer then
+        TriggerClientEvent(FreeGangs.Events.Client.UPDATE_GANG_DATA, newLeaderPlayer.PlayerData.source, {
+            gang = FreeGangs.Server.Gang.GetClientData(gangName),
+            membership = FreeGangs.Server.DB.GetPlayerMembership(newLeaderCitizenid),
+        })
+    end
+end)
+
+-- Relocate stash (boss only)
+RegisterNetEvent('free-gangs:server:relocateStash', function()
+    local source = source
+    local citizenid = FreeGangs.Bridge.GetCitizenId(source)
+    if not citizenid then return end
+
+    local membership = FreeGangs.Server.DB.GetPlayerMembership(citizenid)
+    if not membership or not membership.is_boss then
+        FreeGangs.Bridge.Notify(source, FreeGangs.Config.Messages.NoPermission, 'error')
+        return
+    end
+
+    if not FreeGangs.Config.Stash.AllowStashRelocation then
+        FreeGangs.Bridge.Notify(source, 'Stash relocation is disabled', 'error')
+        return
+    end
+
+    FreeGangs.Bridge.Notify(source, 'Stash relocation is not yet implemented', 'inform')
+end)
+
+-- Request peace (war)
+RegisterNetEvent('free-gangs:server:requestPeace', function(warId)
+    local source = source
+    if not warId then return end
+
+    local success, err = lib.callback.await('free-gangs:callback:requestPeace', source, warId)
+    if not success then
+        FreeGangs.Bridge.Notify(source, err or 'Failed to request peace', 'error')
+    end
+end)
+
+-- Decline war
+RegisterNetEvent('free-gangs:server:declineWar', function(warId)
+    local source = source
+    if not warId then return end
+
+    local success, err = lib.callback.await('free-gangs:callback:declineWar', source, warId)
+    if not success then
+        FreeGangs.Bridge.Notify(source, err or 'Failed to decline war', 'error')
+    end
+end)
+
+-- Terminate bribe
+RegisterNetEvent('free-gangs:server:terminateBribe', function(contactType)
+    local source = source
+    if not contactType then return end
+
+    local citizenid = FreeGangs.Bridge.GetCitizenId(source)
+    if not citizenid then return end
+
+    local membership = FreeGangs.Server.DB.GetPlayerMembership(citizenid)
+    if not membership then return end
+
+    if not FreeGangs.Server.Member.HasPermission(source, FreeGangs.Permissions.MANAGE_BRIBES) then
+        FreeGangs.Bridge.Notify(source, FreeGangs.Config.Messages.NoPermission, 'error')
+        return
+    end
+
+    local gangBribes = FreeGangs.Server.Bribes and FreeGangs.Server.Bribes[membership.gang_name]
+    if gangBribes and gangBribes[contactType] then
+        gangBribes[contactType] = nil
+        FreeGangs.Bridge.Notify(source, 'Contact terminated', 'success')
+    else
+        FreeGangs.Bridge.Notify(source, 'No active contact of that type', 'error')
+    end
+end)
+
+-- Set main corner (Street Gang archetype)
+RegisterNetEvent('free-gangs:server:setMainCorner', function(zoneName)
+    local source = source
+    if not zoneName then return end
+
+    local success = lib.callback.await('free-gangs:callback:setMainCorner', source, zoneName)
+    if success then
+        FreeGangs.Bridge.Notify(source, 'Main corner set to ' .. zoneName, 'success')
+    else
+        FreeGangs.Bridge.Notify(source, 'Failed to set main corner', 'error')
+    end
+end)
+
+-- ============================================================================
 -- COMMANDS (Development/Admin)
 -- ============================================================================
 
