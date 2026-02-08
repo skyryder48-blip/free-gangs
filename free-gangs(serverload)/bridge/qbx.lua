@@ -468,6 +468,21 @@ else
     end
     
     -- ========================================================================
+    -- MONEY (Client-side)
+    -- ========================================================================
+
+    ---Get local player's money
+    ---@param _ any Unused (server compat signature)
+    ---@param moneyType string|nil
+    ---@return number
+    function FreeGangs.Bridge.GetMoney(_, moneyType)
+        local playerData = FreeGangs.Bridge.GetPlayerData()
+        if not playerData then return 0 end
+        moneyType = moneyType or 'cash'
+        return playerData.money and playerData.money[moneyType] or 0
+    end
+
+    -- ========================================================================
     -- INVENTORY (Client-side)
     -- ========================================================================
     

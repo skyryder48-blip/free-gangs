@@ -1029,6 +1029,35 @@ if FreeGangs.Config.General.Debug then
         end
     end, false)
     
+    -- Add reputation to a gang
+    RegisterCommand('fg_addrep', function(source, args)
+        if source ~= 0 and not IsPlayerAceAllowed(source, FreeGangs.Config.Admin.AcePermission) then
+            FreeGangs.Bridge.Notify(source, 'No permission', 'error')
+            return
+        end
+
+        local gangName = args[1]
+        local amount = tonumber(args[2])
+
+        if not gangName or not amount then
+            local msg = 'Usage: /fg_addrep [gangname] [amount]'
+            if source == 0 then print(msg) else FreeGangs.Bridge.Notify(source, msg, 'error') end
+            return
+        end
+
+        local gang = FreeGangs.Server.Gangs[gangName]
+        if not gang then
+            local msg = 'Gang not found: ' .. gangName
+            if source == 0 then print(msg) else FreeGangs.Bridge.Notify(source, msg, 'error') end
+            return
+        end
+
+        local actual = FreeGangs.Server.Reputation.Add(gangName, amount, 'admin_command', source ~= 0 and source or nil)
+        local msg = string.format('Added %d rep to %s (actual: %d, new total: %d, level: %d)',
+            amount, gangName, actual, gang.master_rep, gang.master_level)
+        if source == 0 then print('[free-gangs] ' .. msg) else FreeGangs.Bridge.Notify(source, msg, 'success') end
+    end, false)
+
     -- Debug command to check territories
     RegisterCommand('fg_territories', function(source, args)
         if source ~= 0 and not IsPlayerAceAllowed(source, FreeGangs.Config.Admin.AcePermission) then
