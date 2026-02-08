@@ -311,11 +311,7 @@ function FreeGangs.Client.RegisterKeybinds()
         description = 'Open Gang Menu',
         defaultKey = menuKey,
         onPressed = function()
-            if FreeGangs.Client.PlayerGang then
-                TriggerEvent(FreeGangs.Events.Client.OPEN_GANG_UI)
-            else
-                FreeGangs.Bridge.Notify('You are not in a gang', 'error')
-            end
+            TriggerEvent(FreeGangs.Events.Client.OPEN_GANG_UI)
         end,
     })
 end
