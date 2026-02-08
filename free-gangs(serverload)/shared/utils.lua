@@ -227,27 +227,98 @@ end
 -- TIME UTILITIES
 -- ============================================================================
 
----Get current timestamp in seconds
----@return number
-function FreeGangs.Utils.GetTimestamp()
-    return os.time()
-end
+if IsDuplicityVersion() then
+    -- SERVER SIDE: os library is available
+    ---Get current timestamp in seconds
+    ---@return number
+    function FreeGangs.Utils.GetTimestamp()
+        return os.time()
+    end
 
----Format timestamp to readable date
----@param timestamp number
----@param format string|nil
----@return string
-function FreeGangs.Utils.FormatTime(timestamp, format)
-    format = format or "%Y-%m-%d %H:%M:%S"
-    return os.date(format, timestamp)
+    ---Format timestamp to readable date
+    ---@param timestamp number
+    ---@param format string|nil
+    ---@return string
+    function FreeGangs.Utils.FormatTime(timestamp, format)
+        format = format or "%Y-%m-%d %H:%M:%S"
+        return os.date(format, timestamp)
+    end
+else
+    -- CLIENT SIDE: os library is NOT available in FiveM client
+    local _timeSync = { offset = 0, synced = false }
+
+    ---Sync client time with server Unix time (call once during init)
+    ---@param serverTime number Unix timestamp from server
+    function FreeGangs.Utils.SyncServerTime(serverTime)
+        _timeSync.offset = serverTime - (GetGameTimer() / 1000)
+        _timeSync.synced = true
+    end
+
+    ---Get current timestamp in seconds (synced with server)
+    ---@return number
+    function FreeGangs.Utils.GetTimestamp()
+        return math.floor(GetGameTimer() / 1000 + _timeSync.offset)
+    end
+
+    ---Convert Unix timestamp to date components (pure Lua, no os dependency)
+    ---@param timestamp number
+    ---@return table {year, month, day, hour, min, sec}
+    local function unixToDate(timestamp)
+        timestamp = math.floor(timestamp or 0)
+        local days = math.floor(timestamp / 86400)
+        local remaining = timestamp % 86400
+
+        local hours = math.floor(remaining / 3600)
+        remaining = remaining % 3600
+        local minutes = math.floor(remaining / 60)
+        local seconds = remaining % 60
+
+        local year = 1970
+        while true do
+            local daysInYear = (year % 4 == 0 and (year % 100 ~= 0 or year % 400 == 0)) and 366 or 365
+            if days < daysInYear then break end
+            days = days - daysInYear
+            year = year + 1
+        end
+
+        local isLeap = (year % 4 == 0 and (year % 100 ~= 0 or year % 400 == 0))
+        local daysInMonth = {31, isLeap and 29 or 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31}
+        local month = 1
+        while month <= 12 and days >= daysInMonth[month] do
+            days = days - daysInMonth[month]
+            month = month + 1
+        end
+
+        return {
+            year = year, month = month, day = days + 1,
+            hour = hours, min = minutes, sec = seconds,
+        }
+    end
+
+    ---Format timestamp to readable date (pure Lua implementation)
+    ---@param timestamp number
+    ---@param format string|nil
+    ---@return string
+    function FreeGangs.Utils.FormatTime(timestamp, format)
+        format = format or "%Y-%m-%d %H:%M:%S"
+        local d = unixToDate(timestamp)
+        local result = format
+        result = result:gsub('%%Y', string.format('%04d', d.year))
+        result = result:gsub('%%m', string.format('%02d', d.month))
+        result = result:gsub('%%d', string.format('%02d', d.day))
+        result = result:gsub('%%H', string.format('%02d', d.hour))
+        result = result:gsub('%%M', string.format('%02d', d.min))
+        result = result:gsub('%%S', string.format('%02d', d.sec))
+        return result
+    end
 end
 
 ---Get time difference in human readable format
 ---@param timestamp number
 ---@return string
 function FreeGangs.Utils.TimeAgo(timestamp)
-    local diff = os.time() - timestamp
-    
+    local diff = FreeGangs.Utils.GetTimestamp() - timestamp
+
     if diff < 60 then
         return "just now"
     elseif diff < 3600 then
@@ -272,10 +343,10 @@ function FreeGangs.Utils.FormatDuration(ms)
     local seconds = math.floor(ms / 1000)
     local minutes = math.floor(seconds / 60)
     local hours = math.floor(minutes / 60)
-    
+
     seconds = seconds % 60
     minutes = minutes % 60
-    
+
     if hours > 0 then
         return string.format("%d:%02d:%02d", hours, minutes, seconds)
     else
@@ -287,7 +358,7 @@ end
 ---@param futureTimestamp number
 ---@return number seconds remaining (0 if past)
 function FreeGangs.Utils.TimeUntil(futureTimestamp)
-    local diff = futureTimestamp - os.time()
+    local diff = futureTimestamp - FreeGangs.Utils.GetTimestamp()
     return diff > 0 and diff or 0
 end
 

@@ -33,6 +33,12 @@ local function Initialize()
         Wait(100)
     end
     
+    -- Sync server time for client-side time utilities
+    local serverTime = lib.callback.await('free-gangs:callback:getServerTime', false)
+    if serverTime then
+        FreeGangs.Utils.SyncServerTime(serverTime)
+    end
+
     -- Request initial data from server
     FreeGangs.Client.RequestInitialData()
     
