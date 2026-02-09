@@ -123,8 +123,8 @@ local function FlushTerritories()
                 ]],
                 {
                     json.encode(territory.influence or {}),
-                    territory.last_flip,
-                    territory.cooldown_until,
+                    territory.lastFlip,
+                    territory.cooldownUntil,
                     zoneName
                 }
             }
@@ -377,8 +377,8 @@ function FreeGangs.Server.Cache.SetTerritoryCooldown(zoneName, cooldownUntil)
     local territory = FreeGangs.Server.Territories[zoneName]
     if not territory then return end
     
-    territory.cooldown_until = cooldownUntil
-    territory.last_flip = os.time()
+    territory.cooldownUntil = cooldownUntil
+    territory.lastFlip = os.time()
     
     FreeGangs.Server.Cache.MarkDirty('territory', zoneName)
 end

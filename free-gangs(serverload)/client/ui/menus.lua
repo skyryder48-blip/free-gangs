@@ -460,7 +460,7 @@ function FreeGangs.Client.UI.OpenTerritoryMap()
         if isOwned then ownedCount = ownedCount + 1 end
         if isContested then contestedCount = contestedCount + 1 end
         
-        local zoneTypeInfo = FreeGangs.ZoneTypeInfo[territory.zone_type] or { label = 'Unknown', icon = 'map-marker' }
+        local zoneTypeInfo = FreeGangs.ZoneTypeInfo[territory.zoneType] or { label = 'Unknown', icon = 'map-marker' }
         local statusColor = isOwned and '#00FF00' or (isContested and '#FFAA00' or '#888888')
         
         local metadata = {
@@ -565,8 +565,8 @@ function FreeGangs.Client.UI.ShowTerritoryDetails(zoneName, territory)
     })
     
     -- Cooldown status
-    if territory.cooldown_until and territory.cooldown_until > FreeGangs.Utils.GetTimestamp() then
-        local remaining = territory.cooldown_until - FreeGangs.Utils.GetTimestamp()
+    if territory.cooldownUntil and territory.cooldownUntil > FreeGangs.Utils.GetTimestamp() then
+        local remaining = territory.cooldownUntil - FreeGangs.Utils.GetTimestamp()
         table.insert(options, {
             title = 'Capture Cooldown',
             icon = 'clock',

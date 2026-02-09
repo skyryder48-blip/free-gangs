@@ -65,7 +65,13 @@ function FreeGangs.Server.LoadAllData()
     -- Initialize territory system (syncs config with DB, sets up GlobalState, starts presence thread)
     FreeGangs.Server.Territory.Initialize()
     FreeGangs.Utils.Log('Initialized ' .. FreeGangs.Utils.TableLength(FreeGangs.Server.Territories) .. ' territories')
-    
+
+    -- Initialize prison system
+    if FreeGangs.Server.Prison and FreeGangs.Server.Prison.Initialize then
+        FreeGangs.Server.Prison.Initialize()
+        FreeGangs.Utils.Log('Initialized prison system')
+    end
+
     -- Load heat data
     local heatData = FreeGangs.Server.DB.GetAllHeat()
     for _, heat in pairs(heatData) do
@@ -155,6 +161,16 @@ function FreeGangs.Server.StartBackgroundTasks()
         end
     end)
     
+    -- Prison influence decay task
+    CreateThread(function()
+        while true do
+            Wait(3600000) -- Every hour
+            if FreeGangs.Server.Prison and FreeGangs.Server.Prison.ProcessDecay then
+                FreeGangs.Server.Prison.ProcessDecay()
+            end
+        end
+    end)
+
     -- Bribe payment check task
     CreateThread(function()
         while true do
