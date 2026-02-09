@@ -344,7 +344,12 @@ end
 local function OnPlayerDropped(source)
     -- Clean up player-specific data
     FreeGangs.Server.PlayerCooldowns[source] = nil
-    
+
+    -- Invalidate gang data cache
+    if FreeGangs.Server.InvalidatePlayerGangCache then
+        FreeGangs.Server.InvalidatePlayerGangCache(source)
+    end
+
     FreeGangs.Utils.Debug('Player dropped:', source)
 end
 
@@ -384,16 +389,16 @@ function FreeGangs.Server.IsOnCooldown(source, cooldownType)
     return false, nil
 end
 
----Get remaining cooldown time formatted
+---Get remaining cooldown time in seconds
 ---@param source number
 ---@param cooldownType string
----@return string
+---@return number seconds remaining (0 if not on cooldown)
 function FreeGangs.Server.GetCooldownRemaining(source, cooldownType)
     local onCooldown, remaining = FreeGangs.Server.IsOnCooldown(source, cooldownType)
     if not onCooldown then
-        return '0:00'
+        return 0
     end
-    return FreeGangs.Utils.FormatDuration(remaining * 1000)
+    return remaining or 0
 end
 
 -- ============================================================================
@@ -629,6 +634,9 @@ RegisterNetEvent(FreeGangs.Events.Server.JOIN_GANG, function(gangName)
     if not citizenid then return end
 
     local success, err = FreeGangs.Server.Member.Add(citizenid, gangName, 0)
+    if success and FreeGangs.Server.InvalidatePlayerGangCache then
+        FreeGangs.Server.InvalidatePlayerGangCache(source)
+    end
     if not success then
         FreeGangs.Bridge.Notify(source, err or 'Failed to join gang', 'error')
     end
@@ -647,6 +655,9 @@ RegisterNetEvent(FreeGangs.Events.Server.LEAVE_GANG, function()
     end
 
     local success, err = FreeGangs.Server.Member.Remove(citizenid, membership.gang_name, 'Left voluntarily')
+    if success and FreeGangs.Server.InvalidatePlayerGangCache then
+        FreeGangs.Server.InvalidatePlayerGangCache(source)
+    end
     if not success then
         FreeGangs.Bridge.Notify(source, err or 'Failed to leave gang', 'error')
     end

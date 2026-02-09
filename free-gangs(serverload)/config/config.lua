@@ -61,13 +61,16 @@ FreeGangs.Config.Reputation = {
     MinReputation = 0,
     
     -- Point multipliers (adjust to speed up or slow down progression)
+    -- Keys must match the reason strings passed to AddGangReputation
     Multipliers = {
-        DrugSale = 1.0,
-        Mugging = 1.0,
-        Graffiti = 1.0,
-        Protection = 1.0,
-        ZoneCapture = 1.0,
-        WarVictory = 1.0,
+        drug_sale = 1.0,
+        mugging = 1.0,
+        pickpocket = 1.0,
+        graffiti = 1.0,
+        graffiti_remove = 1.0,
+        protection_collection = 1.0,
+        zone_capture = 1.0,
+        war_victory = 1.0,
     },
     
     -- Diminishing returns settings for drug sales
@@ -224,27 +227,40 @@ FreeGangs.Config.Activities = {
         -- Required weapon types (must have one equipped)
         RequiredWeapons = { 'pistol', 'smg' },
         
-        -- Maximum distance to target NPC
+        -- Maximum distance to target NPC (auto-trigger range)
         MaxDistance = 5.0,
+
+        -- Distance at which mugging cancels during progress
+        CancelDistance = 8.0,
+
+        -- NPC cooldown after being mugged (in seconds)
+        NPCCooldown = 86400, -- 24 hours
     },
     
     -- Pickpocketing
     Pickpocket = {
+        -- Cooldown between pickpockets per player (in seconds)
+        PlayerCooldown = 120, -- 2 minutes
+
         -- Number of loot rolls per successful pickpocket
         LootRolls = 3,
-        
+
         -- Maximum distance to maintain during progress bar
         MaxDistance = 2.0,
-        
+
         -- Loot table (same format as mugging)
         LootTable = {
             { item = 'money', chance = 80, min = 5, max = 50 },
             { item = 'phone', chance = 10, min = 1, max = 1 },
             { item = 'wallet', chance = 15, min = 1, max = 1 },
         },
-        
+
         -- Cooldown before can attempt on same NPC again (even after failure)
         NPCCooldown = 1800, -- 30 minutes
+
+        -- Per-roll NPC detection chance (escalates each roll)
+        DetectionChanceBase = 10, -- 10% on first roll
+        DetectionChancePerRoll = 10, -- +10% per subsequent roll (roll 2 = 20%, roll 3 = 30%)
     },
     
     -- Drug Sales
@@ -255,7 +271,16 @@ FreeGangs.Config.Activities = {
         
         -- Minimum time between sales to same NPC
         NPCSaleCooldown = 30, -- seconds
-        
+
+        -- Player cooldown between drug sales (short, allows rapid transactions)
+        PlayerCooldown = 15, -- seconds
+
+        -- Maximum interaction distance for drug sales
+        MaxDistance = 3.0,
+
+        -- NPC block duration after any transaction (effectively permanent per session)
+        NPCBlockDuration = 999999, -- ~11.5 days, NPC despawns well before this
+
         -- Success chance modifiers
         SuccessChance = {
             Base = 0.60, -- 60%
@@ -277,6 +302,62 @@ FreeGangs.Config.Activities = {
             'lsd',
             'ecstasy',
         },
+
+        -- Per-drug pricing (minPrice to maxPrice range per unit)
+        Drugs = {
+            weed_brick  = { basePrice = 40,  minPrice = 25,  maxPrice = 55 },
+            coke_brick  = { basePrice = 120, minPrice = 90,  maxPrice = 160 },
+            meth        = { basePrice = 100, minPrice = 75,  maxPrice = 135 },
+            crack       = { basePrice = 80,  minPrice = 55,  maxPrice = 110 },
+            heroin      = { basePrice = 130, minPrice = 95,  maxPrice = 170 },
+            oxy         = { basePrice = 70,  minPrice = 50,  maxPrice = 95 },
+            lsd         = { basePrice = 60,  minPrice = 40,  maxPrice = 85 },
+            ecstasy     = { basePrice = 55,  minPrice = 35,  maxPrice = 80 },
+        },
+
+        -- Ped models that always deny sales and alert police
+        -- Law enforcement, emergency services, military, security
+        BlacklistedPedModels = {
+            -- Police
+            's_m_y_cop_01',
+            's_f_y_cop_01',
+            's_m_y_hwaycop_01',
+            's_m_y_sheriff_01',
+            's_f_y_sheriff_01',
+            's_m_y_ranger_01',
+            's_m_y_swat_01',
+            'csb_cop',
+            -- Federal
+            's_m_m_ciasec_01',
+            's_m_m_fibsec_01',
+            's_m_m_fiboffice_01',
+            's_m_m_fiboffice_02',
+            'csb_agent',
+            -- Military
+            's_m_y_marine_01',
+            's_m_y_marine_02',
+            's_m_y_marine_03',
+            's_m_m_marine_01',
+            's_m_m_marine_02',
+            's_m_y_armymech_01',
+            's_m_y_pilot_01',
+            -- Emergency services
+            's_m_y_fireman_01',
+            's_m_m_paramedic_01',
+            -- Prison
+            's_m_m_prisguard_01',
+            -- Security
+            's_m_m_security_01',
+            's_m_m_bouncer_01',
+            's_m_m_armoured_01',
+            's_m_m_armoured_02',
+            's_m_y_blackops_01',
+            's_m_y_blackops_02',
+            's_m_y_blackops_03',
+        },
+
+        -- Wanted level applied when trying to sell to a blacklisted ped
+        BlacklistedPedWantedLevel = 2,
     },
     
     -- Graffiti
@@ -317,6 +398,9 @@ FreeGangs.Config.Activities = {
         
         -- Maximum graffiti per zone
         MaxPerZone = 20,
+
+        -- Minimum distance between tags (meters)
+        MinDistance = 5.0,
     },
     
     -- Protection Racket
@@ -761,7 +845,7 @@ FreeGangs.Config.Messages = {
     MuggingSuccess = 'Mugging successful! Got %s',
     PickpocketSuccess = 'Pickpocket successful!',
     PickpocketFail = 'Pickpocket failed! You\'ve been spotted!',
-    DrugSaleSuccess = 'Sold %s for %s',
+    DrugSaleSuccess = 'Sold %dx %s for %s',
     DrugSaleFail = 'Customer rejected the deal.',
     GraffitiSprayed = 'Tag sprayed! +%d zone influence',
     GraffitiRemoved = 'Rival tag removed!',

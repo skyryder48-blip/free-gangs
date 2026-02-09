@@ -212,16 +212,16 @@ function FreeGangs.Server.Graffiti.Spray(source, coords, rotation, image)
     end
     
     -- Check for spray can item
-    local sprayCanItem = FreeGangs.Config.Activities.Graffiti and 
-                         FreeGangs.Config.Activities.Graffiti.SprayCanItem or 'spray_can'
+    local sprayCanItem = FreeGangs.Config.Activities.Graffiti and
+                         FreeGangs.Config.Activities.Graffiti.RequiredItem or 'spray_can'
     if not FreeGangs.Bridge.HasItem(source, sprayCanItem, 1) then
         return false, FreeGangs.L('activities', 'graffiti_no_spray'), nil
     end
     
     -- Check cycle limit
     local sprayCount = GetPlayerSprayCount(citizenid)
-    local maxSprays = FreeGangs.Config.Activities.Graffiti and 
-                      FreeGangs.Config.Activities.Graffiti.MaxPerCycle or MAX_SPRAYS_PER_CYCLE
+    local maxSprays = FreeGangs.Config.Activities.Graffiti and
+                      FreeGangs.Config.Activities.Graffiti.MaxSpraysPerCycle or MAX_SPRAYS_PER_CYCLE
     if sprayCount >= maxSprays then
         return false, FreeGangs.L('activities', 'graffiti_max_reached'), nil
     end
@@ -383,16 +383,18 @@ function FreeGangs.Server.Graffiti.Remove(source, tagId, isTagOver)
     -- Get player's gang data
     local gangData = FreeGangs.Server.GetPlayerGangData(source)
     
-    -- If not a tag-over, require paint cleaner item
+    -- If not a tag-over, require cleaning item
     if not isTagOver then
-        local cleanerItem = FreeGangs.Config.Activities.Graffiti and 
-                           FreeGangs.Config.Activities.Graffiti.CleanerItem or 'paint_cleaner'
+        local cleanerItem = FreeGangs.Config.Activities.Graffiti and
+                           FreeGangs.Config.Activities.Graffiti.RemovalItem or 'cleaning_kit'
         if not FreeGangs.Bridge.HasItem(source, cleanerItem, 1) then
-            return false, 'You need paint cleaner to remove this tag', nil
+            return false, 'You need a cleaning kit to remove this tag', nil
         end
-        
-        -- Consume cleaner
-        FreeGangs.Bridge.RemoveItem(source, cleanerItem, 1)
+
+        -- Consume cleaner (check return value)
+        if not FreeGangs.Bridge.RemoveItem(source, cleanerItem, 1) then
+            return false, FreeGangs.L('errors', 'generic'), nil
+        end
     end
     
     -- Determine removal type

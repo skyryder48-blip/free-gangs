@@ -150,6 +150,14 @@ local function IsNPCOnCooldown(netId, activity)
     return expiry and os.time() < expiry
 end
 
+---Check if NPC is on cooldown (exposed for callback validation)
+---@param netId number
+---@param activity string
+---@return boolean
+function FreeGangs.Server.Activities.IsNPCOnCooldown(netId, activity)
+    return IsNPCOnCooldown(netId, activity)
+end
+
 ---Set NPC cooldown
 ---@param netId number
 ---@param activity string
@@ -259,80 +267,78 @@ function FreeGangs.Server.Activities.Mug(source, targetNetId)
         return false, FreeGangs.L('errors', 'not_loaded'), nil
     end
     
-    -- Check gang membership
+    -- Check gang membership (optional - non-gang players can mug but don't earn rep)
     local gangData = FreeGangs.Server.GetPlayerGangData(source)
-    if not gangData then
-        return false, FreeGangs.L('gangs', 'not_in_gang'), nil
-    end
-    
+
     -- Check player cooldown
     local cooldownRemaining = FreeGangs.Server.GetCooldownRemaining(source, 'mugging')
     if cooldownRemaining > 0 then
         return false, FreeGangs.L('activities', 'on_cooldown', FreeGangs.Utils.FormatDuration(cooldownRemaining * 1000)), nil
     end
-    
+
     -- Check NPC cooldown (each NPC can only be mugged once)
     if IsNPCOnCooldown(targetNetId, 'mugging') then
         return false, FreeGangs.L('activities', 'invalid_target'), nil
     end
-    
-    -- Set cooldowns
-    FreeGangs.Server.SetCooldown(source, 'mugging', FreeGangs.Config.Activities.Mugging.PlayerCooldown)
-    SetNPCCooldown(targetNetId, 'mugging', 86400)
-    
+
     -- Generate loot
     local config = FreeGangs.Config.Activities.Mugging
     local baseCash = math.random(config.MinCash, config.MaxCash)
     local items, additionalCash = GenerateLoot(config.LootTable, 1)
     local totalCash = baseCash + additionalCash
-    
+
     -- Award loot
     local awardSuccess = AwardLoot(source, items, totalCash)
     if not awardSuccess then
         FreeGangs.Utils.Debug('Failed to award mugging loot to', citizenid)
+        return false, FreeGangs.L('errors', 'generic'), nil
     end
-    
-    -- Get activity points
-    local activityPoints = FreeGangs.ActivityPoints[FreeGangs.Activities.MUGGING]
-    
-    -- Add reputation
-    local repAmount = activityPoints.masterRep
-    FreeGangs.Server.AddGangReputation(gangData.gang.name, repAmount, citizenid, 'mugging')
-    
-    -- Add zone influence if in a territory
+
+    -- Set cooldowns only after successful loot award
+    FreeGangs.Server.SetCooldown(source, 'mugging', FreeGangs.Config.Activities.Mugging.PlayerCooldown)
+    SetNPCCooldown(targetNetId, 'mugging', FreeGangs.Config.Activities.Mugging.NPCCooldown or 86400)
+
+    local repAmount = 0
+    local heatAmount = 0
     local currentZone = FreeGangs.Server.GetPlayerZone(source)
-    if currentZone then
-        local influenceAmount = activityPoints.zoneInfluence
-        AddZoneInfluence(currentZone, gangData.gang.name, influenceAmount)
-    end
-    
-    -- Add heat
-    local heatAmount = activityPoints.heat
-    FreeGangs.Server.AddPlayerHeat(citizenid, heatAmount)
-    
-    -- If in rival territory, add heat with that gang
-    if currentZone then
-        local territory = FreeGangs.Server.Territories[currentZone]
-        if territory then
-            local owner = FreeGangs.Server.GetZoneOwner(currentZone)
-            if owner and owner ~= gangData.gang.name then
-                AddHeat(gangData.gang.name, owner, math.floor(heatAmount / 2), 'mugging_in_territory')
+
+    -- Gang-specific rewards: reputation, influence, heat, logging
+    if gangData then
+        local activityPoints = FreeGangs.ActivityPoints[FreeGangs.Activities.MUGGING]
+
+        repAmount = activityPoints.masterRep
+        FreeGangs.Server.AddGangReputation(gangData.gang.name, repAmount, citizenid, 'mugging')
+
+        if currentZone then
+            local influenceAmount = activityPoints.zoneInfluence
+            AddZoneInfluence(currentZone, gangData.gang.name, influenceAmount)
+        end
+
+        heatAmount = activityPoints.heat
+        FreeGangs.Server.AddPlayerHeat(citizenid, heatAmount)
+
+        if currentZone then
+            local territory = FreeGangs.Server.Territories[currentZone]
+            if territory then
+                local owner = FreeGangs.Server.GetZoneOwner(currentZone)
+                if owner and owner ~= gangData.gang.name then
+                    AddHeat(gangData.gang.name, owner, math.floor(heatAmount / 2), 'mugging_in_territory')
+                end
             end
         end
+
+        FreeGangs.Server.DB.Log(gangData.gang.name, citizenid, 'mugging', FreeGangs.LogCategories.ACTIVITY, {
+            targetNetId = targetNetId,
+            cash = totalCash,
+            items = items,
+            zone = currentZone,
+        })
     end
-    
+
     -- Update hourly stats
     local stats = GetPlayerHourlyStats(citizenid)
     stats.muggings = stats.muggings + 1
-    
-    -- Log activity
-    FreeGangs.Server.DB.Log(gangData.gang.name, citizenid, 'mugging', FreeGangs.LogCategories.ACTIVITY, {
-        targetNetId = targetNetId,
-        cash = totalCash,
-        items = items,
-        zone = currentZone,
-    })
-    
+
     local lootDisplay = FormatLootDisplay(items, totalCash)
     return true, FreeGangs.L('activities', 'mugging_success', lootDisplay), {
         cash = totalCash,
@@ -353,73 +359,104 @@ end
 ---@return boolean success
 ---@return string message
 ---@return table|nil rewards
-function FreeGangs.Server.Activities.Pickpocket(source, targetNetId, success)
+function FreeGangs.Server.Activities.Pickpocket(source, targetNetId, successfulRolls)
+    successfulRolls = tonumber(successfulRolls) or 0
+
     -- Validate player
     local citizenid = FreeGangs.Bridge.GetCitizenId(source)
     if not citizenid then
         return false, FreeGangs.L('errors', 'not_loaded'), nil
     end
-    
-    -- Check gang membership
+
+    -- Check gang membership (optional - non-gang players can pickpocket but don't earn rep)
     local gangData = FreeGangs.Server.GetPlayerGangData(source)
-    if not gangData then
-        return false, FreeGangs.L('gangs', 'not_in_gang'), nil
+
+    -- Check player cooldown
+    local cooldownRemaining = FreeGangs.Server.GetCooldownRemaining(source, 'pickpocket')
+    if cooldownRemaining > 0 then
+        return false, FreeGangs.L('activities', 'on_cooldown', FreeGangs.Utils.FormatDuration(cooldownRemaining * 1000)), nil
     end
-    
+
     -- Check NPC cooldown
     if IsNPCOnCooldown(targetNetId, 'pickpocket') then
         return false, FreeGangs.L('activities', 'invalid_target'), nil
     end
-    
-    -- Set NPC cooldown regardless of success
+
+    -- Set NPC cooldown regardless of outcome
     SetNPCCooldown(targetNetId, 'pickpocket', FreeGangs.Config.Activities.Pickpocket.NPCCooldown)
-    
-    local activityPoints = FreeGangs.ActivityPoints[FreeGangs.Activities.PICKPOCKET]
+
     local currentZone = FreeGangs.Server.GetPlayerZone(source)
-    
-    if not success then
-        -- Failed pickpocket - add heat and potentially alert police
-        local failHeat = FreeGangs.Config.Heat.Points.PickpocketFail
-        FreeGangs.Server.AddPlayerHeat(citizenid, failHeat)
-        
-        -- Log failure
-        FreeGangs.Server.DB.Log(gangData.gang.name, citizenid, 'pickpocket_fail', FreeGangs.LogCategories.ACTIVITY, {
+
+    if successfulRolls <= 0 then
+        -- Failed pickpocket (0 rolls completed)
+        if gangData then
+            local failHeat = FreeGangs.Config.Heat.Points.PickpocketFail
+            FreeGangs.Server.AddPlayerHeat(citizenid, failHeat)
+
+            FreeGangs.Server.DB.Log(gangData.gang.name, citizenid, 'pickpocket_fail', FreeGangs.LogCategories.ACTIVITY, {
+                targetNetId = targetNetId,
+                zone = currentZone,
+            })
+
+            return false, FreeGangs.L('activities', 'pickpocket_fail'), { heat = failHeat, detected = true }
+        end
+
+        return false, FreeGangs.L('activities', 'pickpocket_fail'), { detected = true }
+    end
+
+    -- Successful pickpocket - scale loot by rolls completed
+    local config = FreeGangs.Config.Activities.Pickpocket
+    local maxRolls = config.LootRolls or 3
+    successfulRolls = math.min(successfulRolls, maxRolls)
+
+    local items, cash = GenerateLoot(config.LootTable, successfulRolls)
+
+    AwardLoot(source, items, cash)
+
+    -- Set player cooldown after any successful rolls
+    FreeGangs.Server.SetCooldown(source, 'pickpocket', config.PlayerCooldown or 120)
+
+    local repAmount = 0
+    local heatAmount = 0
+
+    -- Gang-specific rewards: reputation, influence, heat, logging
+    if gangData then
+        local activityPoints = FreeGangs.ActivityPoints[FreeGangs.Activities.PICKPOCKET]
+        local rollRatio = successfulRolls / maxRolls
+
+        repAmount = math.ceil(activityPoints.masterRep * rollRatio)
+        FreeGangs.Server.AddGangReputation(gangData.gang.name, repAmount, citizenid, 'pickpocket')
+
+        if currentZone then
+            local influenceAmount = math.ceil(activityPoints.zoneInfluence * rollRatio)
+            AddZoneInfluence(currentZone, gangData.gang.name, influenceAmount)
+        end
+
+        heatAmount = activityPoints.heat
+        if heatAmount > 0 then
+            FreeGangs.Server.AddPlayerHeat(citizenid, heatAmount)
+        end
+
+        FreeGangs.Server.DB.Log(gangData.gang.name, citizenid, 'pickpocket_success', FreeGangs.LogCategories.ACTIVITY, {
             targetNetId = targetNetId,
+            cash = cash,
+            items = items,
+            rolls = successfulRolls,
+            maxRolls = maxRolls,
             zone = currentZone,
         })
-        
-        return false, FreeGangs.L('activities', 'pickpocket_fail'), { heat = failHeat, detected = true }
     end
-    
-    -- Successful pickpocket
-    local config = FreeGangs.Config.Activities.Pickpocket
-    local items, cash = GenerateLoot(config.LootTable, config.LootRolls)
-    
-    -- Award loot
-    AwardLoot(source, items, cash)
-    
-    -- Add zone influence
-    if currentZone then
-        AddZoneInfluence(currentZone, gangData.gang.name, activityPoints.zoneInfluence)
-    end
-    
+
     -- Update hourly stats
     local stats = GetPlayerHourlyStats(citizenid)
     stats.pickpockets = stats.pickpockets + 1
-    
-    -- Log success
-    FreeGangs.Server.DB.Log(gangData.gang.name, citizenid, 'pickpocket_success', FreeGangs.LogCategories.ACTIVITY, {
-        targetNetId = targetNetId,
-        cash = cash,
-        items = items,
-        zone = currentZone,
-    })
-    
-    local lootDisplay = FormatLootDisplay(items, cash)
+
     return true, FreeGangs.L('activities', 'pickpocket_success'), {
         cash = cash,
         items = items,
-        heat = 0,
+        rep = repAmount,
+        heat = heatAmount,
+        rolls = successfulRolls,
     }
 end
 
@@ -457,7 +494,7 @@ local function CalculateDrugPrice(basePrice, gangName, zoneName)
         final = basePrice,
     }
     
-    if zoneName then
+    if zoneName and gangName then
         local controlTier = GetZoneControlTier(zoneName, gangName)
         modifiers.territory = basePrice * controlTier.drugProfitMod
         
@@ -494,7 +531,9 @@ end
 ---@return string message
 ---@return table|nil result
 function FreeGangs.Server.Activities.SellDrug(source, targetNetId, drugItem, quantity)
-    quantity = quantity or 1
+    -- Validate and sanitize quantity
+    quantity = math.max(1, math.floor(tonumber(quantity) or 1))
+    quantity = math.min(quantity, 10) -- Cap at 10 per transaction
     
     -- Validate player
     local citizenid = FreeGangs.Bridge.GetCitizenId(source)
@@ -502,17 +541,21 @@ function FreeGangs.Server.Activities.SellDrug(source, targetNetId, drugItem, qua
         return false, FreeGangs.L('errors', 'not_loaded'), nil
     end
     
-    -- Check gang membership
+    -- Check gang membership (optional - non-gang players can sell but don't earn rep)
     local gangData = FreeGangs.Server.GetPlayerGangData(source)
-    if not gangData then
-        return false, FreeGangs.L('gangs', 'not_in_gang'), nil
-    end
-    
+    local gangName = gangData and gangData.gang.name or nil
+
     -- Check time restriction
     if not IsDrugSaleHoursActive() then
         return false, FreeGangs.L('activities', 'drug_sale_wrong_time'), nil
     end
-    
+
+    -- Check player cooldown
+    local drugCooldown = FreeGangs.Server.GetCooldownRemaining(source, 'drug_sale')
+    if drugCooldown > 0 then
+        return false, FreeGangs.L('activities', 'on_cooldown', FreeGangs.Utils.FormatDuration(drugCooldown * 1000)), nil
+    end
+
     -- Check if player has the drug
     if not FreeGangs.Bridge.HasItem(source, drugItem, quantity) then
         return false, FreeGangs.L('activities', 'drug_sale_no_product'), nil
@@ -523,40 +566,61 @@ function FreeGangs.Server.Activities.SellDrug(source, targetNetId, drugItem, qua
         return false, FreeGangs.L('activities', 'invalid_target'), nil
     end
     
-    -- Get drug config
-    local drugConfig = FreeGangs.Config.Activities.DrugSales.Drugs and 
+    -- Validate drug item against whitelist
+    local sellableDrugs = FreeGangs.Config.Activities.DrugSales.SellableDrugs or {}
+    local isValidDrug = false
+    for _, validDrug in pairs(sellableDrugs) do
+        if validDrug == drugItem then
+            isValidDrug = true
+            break
+        end
+    end
+    if not isValidDrug then
+        return false, FreeGangs.L('activities', 'drug_sale_no_product'), nil
+    end
+
+    -- Get drug config (per-drug pricing or defaults)
+    local drugConfig = FreeGangs.Config.Activities.DrugSales.Drugs and
                        FreeGangs.Config.Activities.DrugSales.Drugs[drugItem]
     if not drugConfig then
         drugConfig = { basePrice = 50, minPrice = 25, maxPrice = 100 }
     end
-    
-    -- Random sale chance
-    local saleChance = FreeGangs.Config.Activities.DrugSales.BaseSuccessChance or 85
+
+    -- Random sale chance (use SuccessChance.Base config, convert from decimal to percentage)
+    local successChanceConfig = FreeGangs.Config.Activities.DrugSales.SuccessChance
+    local saleChance = successChanceConfig and math.floor((successChanceConfig.Base or 0.60) * 100) or 85
     local currentZone = FreeGangs.Server.GetPlayerZone(source)
     
-    -- Modify chance based on territory
-    if currentZone then
-        local controlTier = GetZoneControlTier(currentZone, gangData.gang.name)
+    -- Modify chance based on territory (gang members only)
+    if currentZone and gangName then
+        local controlTier = GetZoneControlTier(currentZone, gangName)
+        local ownTerritoryBonus = successChanceConfig and math.floor((successChanceConfig.OwnTerritory or 0.20) * 100) or 10
+        local rivalTerritoryPenalty = successChanceConfig and math.floor(math.abs((successChanceConfig.RivalTerritory or -0.30) * 100)) or 20
         if controlTier.influence >= 51 then
-            saleChance = saleChance + 10
+            saleChance = saleChance + ownTerritoryBonus
         elseif controlTier.influence < 10 then
-            saleChance = saleChance - 20
+            saleChance = saleChance - rivalTerritoryPenalty
         end
     end
     
     -- Roll for sale
     if math.random(100) > saleChance then
-        SetNPCCooldown(targetNetId, 'drugSale', 60)
+        local npcBlockDuration = FreeGangs.Config.Activities.DrugSales.NPCBlockDuration or 999999
+        SetNPCCooldown(targetNetId, 'drugSale', npcBlockDuration)
         return false, FreeGangs.L('activities', 'drug_sale_fail'), { rejected = true }
     end
     
-    -- Set NPC cooldown
-    SetNPCCooldown(targetNetId, 'drugSale', FreeGangs.Config.Activities.DrugSales.NPCCooldown or 300)
+    -- Set NPC permanent block (one transaction per NPC for all players)
+    local npcBlockDuration = FreeGangs.Config.Activities.DrugSales.NPCBlockDuration or 999999
+    SetNPCCooldown(targetNetId, 'drugSale', npcBlockDuration)
+
+    -- Set player cooldown (short, allows rapid transactions with different NPCs)
+    FreeGangs.Server.SetCooldown(source, 'drug_sale', FreeGangs.Config.Activities.DrugSales.PlayerCooldown or 15)
     
     -- Calculate price
     local basePrice = math.random(drugConfig.minPrice or drugConfig.basePrice * 0.8, 
                                    drugConfig.maxPrice or drugConfig.basePrice * 1.2)
-    local finalPrice, modifiers = CalculateDrugPrice(basePrice * quantity, gangData.gang.name, currentZone)
+    local finalPrice, modifiers = CalculateDrugPrice(basePrice * quantity, gangName, currentZone)
     
     -- Apply diminishing returns
     local stats = GetPlayerHourlyStats(citizenid)
@@ -564,50 +628,56 @@ function FreeGangs.Server.Activities.SellDrug(source, targetNetId, drugItem, qua
     finalPrice = math.floor(finalPrice * diminishingMult)
     modifiers.diminishing = diminishingMult
     
-    -- Remove drug and give money
+    -- Remove drug and give money (atomic: rollback on failure)
     if not FreeGangs.Bridge.RemoveItem(source, drugItem, quantity) then
         return false, FreeGangs.L('errors', 'generic'), nil
     end
-    
-    FreeGangs.Bridge.AddMoney(source, finalPrice, 'cash', 'drug-sale')
+
+    if not FreeGangs.Bridge.AddMoney(source, finalPrice, 'cash', 'drug-sale') then
+        -- Rollback: give item back
+        FreeGangs.Bridge.AddItem(source, drugItem, quantity)
+        return false, FreeGangs.L('errors', 'generic'), nil
+    end
     
     -- Update stats
     stats.drugSales = stats.drugSales + quantity
     
-    -- Get activity points
-    local activityPoints = FreeGangs.ActivityPoints[FreeGangs.Activities.DRUG_SALE]
-    
-    -- Add reputation
-    local repAmount = math.floor(activityPoints.masterRep * quantity * diminishingMult)
-    FreeGangs.Server.AddGangReputation(gangData.gang.name, repAmount, citizenid, 'drug_sale')
-    
-    -- Add zone influence
-    if currentZone then
-        local influenceAmount = activityPoints.zoneInfluence * quantity
-        AddZoneInfluence(currentZone, gangData.gang.name, influenceAmount)
+    local repAmount = 0
+    local heatAmount = 0
+
+    -- Gang-specific rewards: reputation, influence, heat, logging
+    if gangData then
+        local activityPoints = FreeGangs.ActivityPoints[FreeGangs.Activities.DRUG_SALE]
+
+        repAmount = math.floor(activityPoints.masterRep * quantity * diminishingMult)
+        FreeGangs.Server.AddGangReputation(gangData.gang.name, repAmount, citizenid, 'drug_sale')
+
+        if currentZone then
+            local influenceAmount = activityPoints.zoneInfluence * quantity
+            AddZoneInfluence(currentZone, gangData.gang.name, influenceAmount)
+        end
+
+        heatAmount = activityPoints.heat * quantity
+        FreeGangs.Server.AddPlayerHeat(citizenid, heatAmount)
+
+        FreeGangs.Server.DB.Log(gangData.gang.name, citizenid, 'drug_sale', FreeGangs.LogCategories.ACTIVITY, {
+            drug = drugItem,
+            quantity = quantity,
+            price = finalPrice,
+            modifiers = modifiers,
+            zone = currentZone,
+        })
     end
-    
-    -- Add heat
-    local heatAmount = activityPoints.heat * quantity
-    FreeGangs.Server.AddPlayerHeat(citizenid, heatAmount)
-    
-    -- Log activity
-    FreeGangs.Server.DB.Log(gangData.gang.name, citizenid, 'drug_sale', FreeGangs.LogCategories.ACTIVITY, {
-        drug = drugItem,
-        quantity = quantity,
-        price = finalPrice,
-        modifiers = modifiers,
-        zone = currentZone,
-    })
-    
+
     local drugLabel = FreeGangs.Bridge.GetItemLabel(drugItem) or drugItem
-    return true, FreeGangs.L('activities', 'drug_sale_success', drugLabel, FreeGangs.Bridge.FormatMoney(finalPrice)), {
+    return true, FreeGangs.L('activities', 'drug_sale_success', quantity, drugLabel, FreeGangs.Bridge.FormatMoney(finalPrice)), {
         drug = drugItem,
         quantity = quantity,
         price = finalPrice,
         modifiers = modifiers,
         rep = repAmount,
         heat = heatAmount,
+        diminishing = diminishingMult,
     }
 end
 
@@ -633,9 +703,7 @@ function FreeGangs.Server.Activities.RegisterProtection(source, businessData)
     
     -- Check permission
     if not FreeGangs.Server.HasPermission(source, FreeGangs.Permissions.COLLECT_PROTECTION) then
-        if not gangData.membership.isBoss and gangData.membership.is_boss ~= 1 then
-            return false, FreeGangs.L('general', 'no_permission')
-        end
+        return false, FreeGangs.L('general', 'no_permission')
     end
     
     -- Check zone control requirement
@@ -667,7 +735,10 @@ function FreeGangs.Server.Activities.RegisterProtection(source, businessData)
         business_label = businessData.business_label,
         zone_name = zoneName,
         coords = businessData.coords,
-        payout_base = businessData.payout_base or FreeGangs.Config.Activities.Protection.BasePayout or 500,
+        payout_base = math.random(
+            FreeGangs.Config.Activities.Protection.BasePayoutMin or 200,
+            FreeGangs.Config.Activities.Protection.BasePayoutMax or 800
+        ),
         established_by = citizenid,
     }
     
@@ -716,23 +787,27 @@ function FreeGangs.Server.Activities.CollectProtection(source, businessId)
         return false, FreeGangs.L('activities', 'invalid_target'), nil
     end
     
-    -- Check collection cooldown
-    local collectionCooldown = FreeGangs.Config.Activities.Protection and 
-                               FreeGangs.Config.Activities.Protection.CollectionInterval or 14400
+    -- Check collection cooldown (use CollectionIntervalHours from config)
+    local collectionCooldownHours = FreeGangs.Config.Activities.Protection and
+                                    FreeGangs.Config.Activities.Protection.CollectionIntervalHours or 4
+    local collectionCooldown = collectionCooldownHours * 3600
     local lastCollection = protectionCollections[businessId] or 0
     local now = os.time()
-    
+
     if protection.last_collection then
         local lastDbCollection = FreeGangs.Utils.ParseTimestamp(protection.last_collection)
         if lastDbCollection and lastDbCollection > lastCollection then
             lastCollection = lastDbCollection
         end
     end
-    
+
     if now - lastCollection < collectionCooldown then
         local remaining = collectionCooldown - (now - lastCollection)
         return false, FreeGangs.L('activities', 'protection_not_ready') .. ' (' .. FreeGangs.Utils.FormatDuration(remaining * 1000) .. ')', nil
     end
+
+    -- Immediately claim the slot to prevent TOCTOU race condition
+    protectionCollections[businessId] = now
     
     -- Check zone control
     local zoneName = protection.zone_name
@@ -778,8 +853,7 @@ function FreeGangs.Server.Activities.CollectProtection(source, businessId)
     
     local finalPayout = math.floor(basePayout * multiplier)
     
-    -- Update collection timestamp
-    protectionCollections[businessId] = now
+    -- Persist collection timestamp to database
     FreeGangs.Server.DB.UpdateProtectionCollection(businessId)
     
     -- Give money
@@ -841,7 +915,7 @@ function FreeGangs.Server.AddGangReputation(gangName, amount, citizenid, reason)
         amount = math.floor(amount * multiplierKey)
     end
     
-    local newRep = gang.master_rep + amount
+    local newRep = math.max(0, gang.master_rep + amount)
     FreeGangs.Server.SetGangReputation(gangName, newRep, reason)
 end
 
@@ -890,21 +964,50 @@ function FreeGangs.Server.GetZoneOwner(zoneName)
     return nil
 end
 
----Get player's gang data
+-- Player gang data cache: source -> { data, expiry }
+local playerGangCache = {}
+local GANG_CACHE_TTL = 30 -- Cache for 30 seconds
+
+---Get player's gang data (optimized: single DB query + cache)
 ---@param source number
 ---@return table|nil {gang, membership}
 function FreeGangs.Server.GetPlayerGangData(source)
+    local now = os.time()
+    local cached = playerGangCache[source]
+    if cached and now < cached.expiry then
+        return cached.data
+    end
+
     local citizenid = FreeGangs.Bridge.GetCitizenId(source)
     if not citizenid then return nil end
-    
-    for gangName, gang in pairs(FreeGangs.Server.Gangs) do
-        local member = FreeGangs.Server.DB.GetMember(gangName, citizenid)
-        if member then
-            return { gang = gang, membership = member }
-        end
+
+    -- Single DB query instead of looping all gangs
+    local membership = FreeGangs.Server.DB.GetPlayerMembership(citizenid)
+    if not membership or not membership.gang_name then
+        playerGangCache[source] = { data = nil, expiry = now + GANG_CACHE_TTL }
+        return nil
     end
-    
-    return nil
+
+    local gang = FreeGangs.Server.Gangs[membership.gang_name]
+    if not gang then
+        playerGangCache[source] = { data = nil, expiry = now + GANG_CACHE_TTL }
+        return nil
+    end
+
+    local data = { gang = gang, membership = membership }
+    playerGangCache[source] = { data = data, expiry = now + GANG_CACHE_TTL }
+    return data
+end
+
+---Invalidate a player's cached gang data
+---@param source number
+function FreeGangs.Server.InvalidatePlayerGangCache(source)
+    playerGangCache[source] = nil
+end
+
+---Invalidate all cached gang data (e.g., on gang structure changes)
+function FreeGangs.Server.InvalidateAllPlayerGangCache()
+    playerGangCache = {}
 end
 
 ---Check if player has a specific permission
@@ -932,10 +1035,33 @@ function FreeGangs.Server.HasPermission(source, permission)
 end
 
 -- ============================================================================
+-- DB COMPATIBILITY
+-- ============================================================================
+
+-- DB.GetMember wrapper: used by heat/war callbacks with (citizenid) or (gangName, citizenid)
+if not FreeGangs.Server.DB.GetMember then
+    function FreeGangs.Server.DB.GetMember(gangNameOrCitizenid, citizenid)
+        if citizenid then
+            -- Called as GetMember(gangName, citizenid) - check specific gang
+            local membership = FreeGangs.Server.DB.GetPlayerMembership(citizenid)
+            if membership and membership.gang_name == gangNameOrCitizenid then
+                return membership
+            end
+            return nil
+        else
+            -- Called as GetMember(citizenid) - get any gang membership
+            return FreeGangs.Server.DB.GetPlayerMembership(gangNameOrCitizenid)
+        end
+    end
+end
+
+-- ============================================================================
 -- CLEANUP THREADS
 -- ============================================================================
 
 CreateThread(function()
+    CleanupNPCCooldowns()
+    CleanupHourlyStats()
     while true do
         Wait(300000)
         CleanupNPCCooldowns()

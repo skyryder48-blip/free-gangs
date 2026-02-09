@@ -25,7 +25,6 @@ local renderThread = nil
 
 -- Graffiti decal/prop models (using in-game props for visual representation)
 local graffitiModels = {
-    'prop_cs_spray_can',      -- Spray can prop
     'prop_graffiti_ld_01',    -- Gang graffiti prop
     'prop_graffiti_ld_02',
     'prop_graffiti_ld_03',
@@ -221,6 +220,7 @@ local function LoadGraffitiVisuals(tags)
             if entity then
                 activeGraffitiObjects[tag.id] = entity
                 loadedGraffiti[tag.id] = tag
+                AddTagTargeting(tag.id)
             end
         end
     end
@@ -244,15 +244,19 @@ local function UpdateVisibleGraffiti()
     local coords = GetEntityCoords(ped)
     local config = GetConfig()
     
-    -- Remove out-of-range graffiti
+    -- Remove out-of-range graffiti (collect IDs first to avoid modifying table during iteration)
+    local toRemove = {}
     for tagId, tag in pairs(loadedGraffiti) do
         if tag.coords then
             local distance = GetDistance(coords, tag.coords)
             if distance > config.renderDistance then
-                RemoveGraffitiVisual(tagId)
-                loadedGraffiti[tagId] = nil
+                toRemove[#toRemove + 1] = tagId
             end
         end
+    end
+    for _, tagId in ipairs(toRemove) do
+        RemoveGraffitiVisual(tagId)
+        loadedGraffiti[tagId] = nil
     end
     
     -- Request nearby graffiti from server
@@ -355,10 +359,11 @@ function FreeGangs.Client.Graffiti.StartSpray(wallCoords)
         },
     })
     
-    -- Clean up prop
+    -- Clean up prop and release model
     if sprayCanProp and DoesEntityExist(sprayCanProp) then
         DeleteEntity(sprayCanProp)
     end
+    SetModelAsNoLongerNeeded(sprayCanHash)
     
     -- Clear animation
     ClearPedTasks(ped)
@@ -383,20 +388,31 @@ function FreeGangs.Client.Graffiti.StartSpray(wallCoords)
                 end
             end
             
-            -- Play success effect
+            -- Play success effect (non-looped particle with timeout and cleanup)
             local particleDict = 'core'
             local particleName = 'ent_amb_smoke_foundry'
             RequestNamedPtfxAsset(particleDict)
-            while not HasNamedPtfxAssetLoaded(particleDict) do
+            local ptfxTimeout = 0
+            while not HasNamedPtfxAssetLoaded(particleDict) and ptfxTimeout < 200 do
                 Wait(10)
+                ptfxTimeout = ptfxTimeout + 1
             end
-            SetPtfxAssetNextCall(particleDict)
-            StartParticleFxLoopedAtCoord(
-                particleName,
-                coords.x, coords.y, coords.z,
-                0.0, 0.0, 0.0,
-                0.5, false, false, false, false
-            )
+            if HasNamedPtfxAssetLoaded(particleDict) then
+                SetPtfxAssetNextCall(particleDict)
+                local ptfxHandle = StartParticleFxLoopedAtCoord(
+                    particleName,
+                    coords.x, coords.y, coords.z,
+                    0.0, 0.0, 0.0,
+                    0.5, false, false, false, false
+                )
+                -- Stop looped particle after 2 seconds and release asset
+                SetTimeout(2000, function()
+                    if ptfxHandle then
+                        StopParticleFxLooped(ptfxHandle, false)
+                    end
+                    RemoveNamedPtfxAsset(particleDict)
+                end)
+            end
         else
             FreeGangs.Bridge.Notify(message or FreeGangs.L('errors', 'generic'), 'error')
         end
@@ -778,15 +794,15 @@ end)
 -- ============================================================================
 
 ---Start the graffiti render thread
+local renderThreadStarted = false
 local function StartRenderThread()
-    if renderThread then return end
-    
-    renderThread = CreateThread(function()
-        local config = GetConfig()
-        
+    if renderThreadStarted then return end
+    renderThreadStarted = true
+
+    CreateThread(function()
         while true do
             Wait(5000) -- Check every 5 seconds
-            
+
             if FreeGangs.Client.Ready then
                 UpdateVisibleGraffiti()
             end
