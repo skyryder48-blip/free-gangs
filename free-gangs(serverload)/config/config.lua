@@ -61,13 +61,16 @@ FreeGangs.Config.Reputation = {
     MinReputation = 0,
     
     -- Point multipliers (adjust to speed up or slow down progression)
+    -- Keys must match the reason strings passed to AddGangReputation
     Multipliers = {
-        DrugSale = 1.0,
-        Mugging = 1.0,
-        Graffiti = 1.0,
-        Protection = 1.0,
-        ZoneCapture = 1.0,
-        WarVictory = 1.0,
+        drug_sale = 1.0,
+        mugging = 1.0,
+        pickpocket = 1.0,
+        graffiti = 1.0,
+        graffiti_remove = 1.0,
+        protection_collection = 1.0,
+        zone_capture = 1.0,
+        war_victory = 1.0,
     },
     
     -- Diminishing returns settings for drug sales
@@ -226,23 +229,29 @@ FreeGangs.Config.Activities = {
         
         -- Maximum distance to target NPC
         MaxDistance = 5.0,
+
+        -- NPC cooldown after being mugged (in seconds)
+        NPCCooldown = 86400, -- 24 hours
     },
     
     -- Pickpocketing
     Pickpocket = {
+        -- Cooldown between pickpockets per player (in seconds)
+        PlayerCooldown = 120, -- 2 minutes
+
         -- Number of loot rolls per successful pickpocket
         LootRolls = 3,
-        
+
         -- Maximum distance to maintain during progress bar
         MaxDistance = 2.0,
-        
+
         -- Loot table (same format as mugging)
         LootTable = {
             { item = 'money', chance = 80, min = 5, max = 50 },
             { item = 'phone', chance = 10, min = 1, max = 1 },
             { item = 'wallet', chance = 15, min = 1, max = 1 },
         },
-        
+
         -- Cooldown before can attempt on same NPC again (even after failure)
         NPCCooldown = 1800, -- 30 minutes
     },
@@ -317,6 +326,9 @@ FreeGangs.Config.Activities = {
         
         -- Maximum graffiti per zone
         MaxPerZone = 20,
+
+        -- Minimum distance between tags (meters)
+        MinDistance = 5.0,
     },
     
     -- Protection Racket

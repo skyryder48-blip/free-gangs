@@ -16,15 +16,7 @@ FreeGangs.Client.Activities = {}
 -- ============================================================================
 
 local isPerformingActivity = false
-local activityCooldowns = {}
 local targetingEnabled = false
-
--- Weapon hashes for mugging requirement
-local mugWeaponClasses = {
-    [2] = true, -- Melee
-    [3] = true, -- Handguns
-    [4] = true, -- Submachine guns
-}
 
 -- ============================================================================
 -- UTILITY FUNCTIONS
@@ -171,10 +163,7 @@ function FreeGangs.Client.Activities.StartMugging(targetPed)
     TaskTurnPedToFaceCoord(ped, targetCoords.x, targetCoords.y, targetCoords.z, 1000)
     Wait(500)
     
-    -- Play pointing animation
-    PlayAnim('mp_missheist_countrybank@aim', 'aim_loop', -1, 49)
-    
-    -- Progress bar
+    -- Progress bar (with aim animation)
     local success = lib.progressBar({
         duration = 3000,
         label = 'Mugging...',
@@ -392,9 +381,21 @@ function FreeGangs.Client.Activities.StartDrugSale(targetPed)
             return
         end
     end
-    
+
+    -- Re-validate target NPC after menu (may have despawned or moved)
+    if not DoesEntityExist(targetPed) or IsPedDeadOrDying(targetPed) then
+        FreeGangs.Bridge.Notify('Target is no longer available', 'error')
+        return
+    end
+    local playerCoords = GetEntityCoords(FreeGangs.Client.GetPlayerPed())
+    local targetCheckCoords = GetEntityCoords(targetPed)
+    if #(playerCoords - targetCheckCoords) > 5.0 then
+        FreeGangs.Bridge.Notify(FreeGangs.L('activities', 'too_far') or 'Too far away', 'error')
+        return
+    end
+
     SetBusy(true)
-    
+
     local targetNetId = NetworkGetNetworkIdFromEntity(targetPed)
     TriggerServerEvent('freegangs:server:startDrugSale', targetNetId)
     
@@ -467,7 +468,7 @@ function FreeGangs.Client.Activities.OpenProtectionMenu()
     local options = {}
     
     for _, business in pairs(businesses) do
-        local status = business.isReady and '^2Ready^7' or '^1' .. FreeGangs.Utils.FormatDuration(business.timeRemaining * 1000) .. '^7'
+        local status = business.isReady and 'Ready' or FreeGangs.Utils.FormatDuration(business.timeRemaining * 1000)
         
         options[#options + 1] = {
             title = business.business_label or business.business_id,
@@ -577,13 +578,23 @@ function FreeGangs.Client.Activities.SetupTargeting()
                 if isPerformingActivity then return false end
                 if IsPedAPlayer(entity) then return false end
                 if IsPedDeadOrDying(entity) then return false end
-                -- Check if NPC is facing away (for stealth)
+                -- Check if player is behind the NPC (position-based check)
                 local ped = FreeGangs.Client.GetPlayerPed()
-                local pedHeading = GetEntityHeading(ped)
+                local pedCoords = GetEntityCoords(ped)
+                local npcCoords = GetEntityCoords(entity)
                 local npcHeading = GetEntityHeading(entity)
-                local headingDiff = math.abs(pedHeading - npcHeading)
-                -- Must be behind the NPC (heading difference ~180)
-                return headingDiff > 120 and headingDiff < 240
+
+                -- Angle from NPC to player in GTA heading space
+                local dx = pedCoords.x - npcCoords.x
+                local dy = pedCoords.y - npcCoords.y
+                local angleToPlayer = math.deg(math.atan(dx, dy)) % 360
+
+                -- How far is the player from the NPC's forward direction?
+                local angleDiff = math.abs(npcHeading - angleToPlayer) % 360
+                if angleDiff > 180 then angleDiff = 360 - angleDiff end
+
+                -- Player is "behind" if they are more than 120 degrees from the NPC's forward
+                return angleDiff > 120
             end,
             onSelect = function(data)
                 FreeGangs.Client.Activities.StartPickpocket(data.entity)

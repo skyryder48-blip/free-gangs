@@ -35,22 +35,20 @@ lib.callback.register(FreeGangs.Callbacks.CAN_PERFORM_ACTIVITY, function(source,
         return true
         
     elseif activity == 'drug_sale' then
-        -- Check time restriction
-        local gameHour = data and data.gameHour
-        if gameHour then
-            local startHour = FreeGangs.Config.Activities.DrugSales.AllowedStartHour
-            local endHour = FreeGangs.Config.Activities.DrugSales.AllowedEndHour
-            
-            local validTime
-            if startHour > endHour then
-                validTime = gameHour >= startHour or gameHour < endHour
-            else
-                validTime = gameHour >= startHour and gameHour < endHour
-            end
-            
-            if not validTime then
-                return false, FreeGangs.L('activities', 'drug_sale_wrong_time')
-            end
+        -- Check time restriction using server-side game time (don't trust client)
+        local gameHour = GetClockHours and GetClockHours() or 12
+        local startHour = FreeGangs.Config.Activities.DrugSales.AllowedStartHour
+        local endHour = FreeGangs.Config.Activities.DrugSales.AllowedEndHour
+
+        local validTime
+        if startHour > endHour then
+            validTime = gameHour >= startHour or gameHour < endHour
+        else
+            validTime = gameHour >= startHour and gameHour < endHour
+        end
+
+        if not validTime then
+            return false, FreeGangs.L('activities', 'drug_sale_wrong_time')
         end
         return true
         
@@ -63,15 +61,16 @@ lib.callback.register(FreeGangs.Callbacks.CAN_PERFORM_ACTIVITY, function(source,
         
     elseif activity == 'graffiti' then
         -- Check for spray can
-        local sprayCanItem = FreeGangs.Config.Activities.Graffiti and 
-                            FreeGangs.Config.Activities.Graffiti.SprayCanItem or 'spray_can'
+        local sprayCanItem = FreeGangs.Config.Activities.Graffiti and
+                            FreeGangs.Config.Activities.Graffiti.RequiredItem or 'spray_can'
         if not FreeGangs.Bridge.HasItem(source, sprayCanItem, 1) then
             return false, FreeGangs.L('activities', 'graffiti_no_spray')
         end
         return true
     end
-    
-    return true
+
+    -- Deny unknown activity types by default
+    return false, 'Unknown activity'
 end)
 
 -- ============================================================================
@@ -80,6 +79,7 @@ end)
 
 ---Process mugging completion
 lib.callback.register('freegangs:activities:completeMugging', function(source, targetNetId)
+    if not targetNetId or type(targetNetId) ~= 'number' then return false, 'Invalid target' end
     return FreeGangs.Server.Activities.Mug(source, targetNetId)
 end)
 
@@ -126,6 +126,9 @@ end)
 
 ---Process drug sale
 lib.callback.register('freegangs:activities:completeDrugSale', function(source, targetNetId, drugItem, quantity)
+    -- Validate parameters
+    if not targetNetId or type(targetNetId) ~= 'number' then return false, 'Invalid target' end
+    if not drugItem or type(drugItem) ~= 'string' then return false, 'Invalid drug item' end
     return FreeGangs.Server.Activities.SellDrug(source, targetNetId, drugItem, quantity or 1)
 end)
 
@@ -133,13 +136,33 @@ end)
 lib.callback.register('freegangs:activities:getDrugInventory', function(source)
     local citizenid = FreeGangs.Bridge.GetCitizenId(source)
     if not citizenid then return {} end
-    
-    -- Get configured drug items
-    local drugItems = {}
-    local drugsConfig = FreeGangs.Config.Activities.DrugSales and 
+
+    -- Check gang membership
+    local gangData = FreeGangs.Server.GetPlayerGangData(source)
+    if not gangData then return {} end
+
+    -- Use SellableDrugs from config (array of item names)
+    local sellableDrugs = FreeGangs.Config.Activities.DrugSales and
+                          FreeGangs.Config.Activities.DrugSales.SellableDrugs
+
+    -- Also check Drugs table (keyed config) for backwards compatibility
+    local drugsConfig = FreeGangs.Config.Activities.DrugSales and
                        FreeGangs.Config.Activities.DrugSales.Drugs
-    
-    if drugsConfig then
+
+    local drugItems = {}
+
+    if sellableDrugs and #sellableDrugs > 0 then
+        for _, itemName in pairs(sellableDrugs) do
+            local count = FreeGangs.Bridge.GetItemCount(source, itemName)
+            if count > 0 then
+                drugItems[#drugItems + 1] = {
+                    item = itemName,
+                    label = FreeGangs.Bridge.GetItemLabel(itemName) or itemName,
+                    count = count,
+                }
+            end
+        end
+    elseif drugsConfig then
         for itemName, _ in pairs(drugsConfig) do
             local count = FreeGangs.Bridge.GetItemCount(source, itemName)
             if count > 0 then
@@ -150,21 +173,8 @@ lib.callback.register('freegangs:activities:getDrugInventory', function(source)
                 }
             end
         end
-    else
-        -- Default drug items if not configured
-        local defaultDrugs = { 'weed', 'cocaine', 'meth', 'oxy', 'crack' }
-        for _, itemName in pairs(defaultDrugs) do
-            local count = FreeGangs.Bridge.GetItemCount(source, itemName)
-            if count > 0 then
-                drugItems[#drugItems + 1] = {
-                    item = itemName,
-                    label = FreeGangs.Bridge.GetItemLabel(itemName) or itemName,
-                    count = count,
-                }
-            end
-        end
     end
-    
+
     return drugItems
 end)
 
@@ -197,8 +207,9 @@ lib.callback.register(FreeGangs.Callbacks.GET_PROTECTION_BUSINESSES, function(so
     
     -- Add ready status to each business
     local now = os.time()
-    local collectionCooldown = FreeGangs.Config.Activities.Protection and 
-                               FreeGangs.Config.Activities.Protection.CollectionInterval or 14400
+    local collectionCooldownHours = FreeGangs.Config.Activities.Protection and
+                                    FreeGangs.Config.Activities.Protection.CollectionIntervalHours or 4
+    local collectionCooldown = collectionCooldownHours * 3600
     
     for _, business in pairs(businesses) do
         local lastCollection = 0
@@ -318,6 +329,15 @@ lib.callback.register('freegangs:activities:getCooldowns', function(source)
         cooldowns.mugging = {
             remaining = muggingRemaining,
             formatted = FreeGangs.Utils.FormatDuration(muggingRemaining * 1000),
+        }
+    end
+
+    -- Pickpocket cooldown
+    local pickpocketRemaining = FreeGangs.Server.GetCooldownRemaining(source, 'pickpocket')
+    if pickpocketRemaining > 0 then
+        cooldowns.pickpocket = {
+            remaining = pickpocketRemaining,
+            formatted = FreeGangs.Utils.FormatDuration(pickpocketRemaining * 1000),
         }
     end
     

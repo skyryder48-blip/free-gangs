@@ -270,27 +270,28 @@ function FreeGangs.Server.Activities.Mug(source, targetNetId)
     if cooldownRemaining > 0 then
         return false, FreeGangs.L('activities', 'on_cooldown', FreeGangs.Utils.FormatDuration(cooldownRemaining * 1000)), nil
     end
-    
+
     -- Check NPC cooldown (each NPC can only be mugged once)
     if IsNPCOnCooldown(targetNetId, 'mugging') then
         return false, FreeGangs.L('activities', 'invalid_target'), nil
     end
-    
-    -- Set cooldowns
-    FreeGangs.Server.SetCooldown(source, 'mugging', FreeGangs.Config.Activities.Mugging.PlayerCooldown)
-    SetNPCCooldown(targetNetId, 'mugging', 86400)
-    
+
     -- Generate loot
     local config = FreeGangs.Config.Activities.Mugging
     local baseCash = math.random(config.MinCash, config.MaxCash)
     local items, additionalCash = GenerateLoot(config.LootTable, 1)
     local totalCash = baseCash + additionalCash
-    
+
     -- Award loot
     local awardSuccess = AwardLoot(source, items, totalCash)
     if not awardSuccess then
         FreeGangs.Utils.Debug('Failed to award mugging loot to', citizenid)
+        return false, FreeGangs.L('errors', 'generic'), nil
     end
+
+    -- Set cooldowns only after successful loot award
+    FreeGangs.Server.SetCooldown(source, 'mugging', FreeGangs.Config.Activities.Mugging.PlayerCooldown)
+    SetNPCCooldown(targetNetId, 'mugging', FreeGangs.Config.Activities.Mugging.NPCCooldown or 86400)
     
     -- Get activity points
     local activityPoints = FreeGangs.ActivityPoints[FreeGangs.Activities.MUGGING]
@@ -366,47 +367,66 @@ function FreeGangs.Server.Activities.Pickpocket(source, targetNetId, success)
         return false, FreeGangs.L('gangs', 'not_in_gang'), nil
     end
     
+    -- Check player cooldown
+    local cooldownRemaining = FreeGangs.Server.GetCooldownRemaining(source, 'pickpocket')
+    if cooldownRemaining > 0 then
+        return false, FreeGangs.L('activities', 'on_cooldown', FreeGangs.Utils.FormatDuration(cooldownRemaining * 1000)), nil
+    end
+
     -- Check NPC cooldown
     if IsNPCOnCooldown(targetNetId, 'pickpocket') then
         return false, FreeGangs.L('activities', 'invalid_target'), nil
     end
-    
+
     -- Set NPC cooldown regardless of success
     SetNPCCooldown(targetNetId, 'pickpocket', FreeGangs.Config.Activities.Pickpocket.NPCCooldown)
-    
+
     local activityPoints = FreeGangs.ActivityPoints[FreeGangs.Activities.PICKPOCKET]
     local currentZone = FreeGangs.Server.GetPlayerZone(source)
-    
+
     if not success then
         -- Failed pickpocket - add heat and potentially alert police
         local failHeat = FreeGangs.Config.Heat.Points.PickpocketFail
         FreeGangs.Server.AddPlayerHeat(citizenid, failHeat)
-        
+
         -- Log failure
         FreeGangs.Server.DB.Log(gangData.gang.name, citizenid, 'pickpocket_fail', FreeGangs.LogCategories.ACTIVITY, {
             targetNetId = targetNetId,
             zone = currentZone,
         })
-        
+
         return false, FreeGangs.L('activities', 'pickpocket_fail'), { heat = failHeat, detected = true }
     end
-    
+
     -- Successful pickpocket
     local config = FreeGangs.Config.Activities.Pickpocket
     local items, cash = GenerateLoot(config.LootTable, config.LootRolls)
-    
+
     -- Award loot
     AwardLoot(source, items, cash)
-    
+
+    -- Set player cooldown after successful pickpocket
+    FreeGangs.Server.SetCooldown(source, 'pickpocket', config.PlayerCooldown or 120)
+
+    -- Add reputation
+    local repAmount = activityPoints.masterRep
+    FreeGangs.Server.AddGangReputation(gangData.gang.name, repAmount, citizenid, 'pickpocket')
+
     -- Add zone influence
     if currentZone then
         AddZoneInfluence(currentZone, gangData.gang.name, activityPoints.zoneInfluence)
     end
-    
+
+    -- Add heat
+    local heatAmount = activityPoints.heat
+    if heatAmount > 0 then
+        FreeGangs.Server.AddPlayerHeat(citizenid, heatAmount)
+    end
+
     -- Update hourly stats
     local stats = GetPlayerHourlyStats(citizenid)
     stats.pickpockets = stats.pickpockets + 1
-    
+
     -- Log success
     FreeGangs.Server.DB.Log(gangData.gang.name, citizenid, 'pickpocket_success', FreeGangs.LogCategories.ACTIVITY, {
         targetNetId = targetNetId,
@@ -414,12 +434,13 @@ function FreeGangs.Server.Activities.Pickpocket(source, targetNetId, success)
         items = items,
         zone = currentZone,
     })
-    
+
     local lootDisplay = FormatLootDisplay(items, cash)
     return true, FreeGangs.L('activities', 'pickpocket_success'), {
         cash = cash,
         items = items,
-        heat = 0,
+        rep = repAmount,
+        heat = heatAmount,
     }
 end
 
@@ -494,7 +515,9 @@ end
 ---@return string message
 ---@return table|nil result
 function FreeGangs.Server.Activities.SellDrug(source, targetNetId, drugItem, quantity)
-    quantity = quantity or 1
+    -- Validate and sanitize quantity
+    quantity = math.max(1, math.floor(tonumber(quantity) or 1))
+    quantity = math.min(quantity, 10) -- Cap at 10 per transaction
     
     -- Validate player
     local citizenid = FreeGangs.Bridge.GetCitizenId(source)
@@ -523,24 +546,40 @@ function FreeGangs.Server.Activities.SellDrug(source, targetNetId, drugItem, qua
         return false, FreeGangs.L('activities', 'invalid_target'), nil
     end
     
-    -- Get drug config
-    local drugConfig = FreeGangs.Config.Activities.DrugSales.Drugs and 
+    -- Validate drug item against whitelist
+    local sellableDrugs = FreeGangs.Config.Activities.DrugSales.SellableDrugs or {}
+    local isValidDrug = false
+    for _, validDrug in pairs(sellableDrugs) do
+        if validDrug == drugItem then
+            isValidDrug = true
+            break
+        end
+    end
+    if not isValidDrug then
+        return false, FreeGangs.L('activities', 'drug_sale_no_product'), nil
+    end
+
+    -- Get drug config (per-drug pricing or defaults)
+    local drugConfig = FreeGangs.Config.Activities.DrugSales.Drugs and
                        FreeGangs.Config.Activities.DrugSales.Drugs[drugItem]
     if not drugConfig then
         drugConfig = { basePrice = 50, minPrice = 25, maxPrice = 100 }
     end
-    
-    -- Random sale chance
-    local saleChance = FreeGangs.Config.Activities.DrugSales.BaseSuccessChance or 85
+
+    -- Random sale chance (use SuccessChance.Base config, convert from decimal to percentage)
+    local successChanceConfig = FreeGangs.Config.Activities.DrugSales.SuccessChance
+    local saleChance = successChanceConfig and math.floor((successChanceConfig.Base or 0.60) * 100) or 85
     local currentZone = FreeGangs.Server.GetPlayerZone(source)
     
-    -- Modify chance based on territory
+    -- Modify chance based on territory (use config values)
     if currentZone then
         local controlTier = GetZoneControlTier(currentZone, gangData.gang.name)
+        local ownTerritoryBonus = successChanceConfig and math.floor((successChanceConfig.OwnTerritory or 0.20) * 100) or 10
+        local rivalTerritoryPenalty = successChanceConfig and math.floor(math.abs((successChanceConfig.RivalTerritory or -0.30) * 100)) or 20
         if controlTier.influence >= 51 then
-            saleChance = saleChance + 10
+            saleChance = saleChance + ownTerritoryBonus
         elseif controlTier.influence < 10 then
-            saleChance = saleChance - 20
+            saleChance = saleChance - rivalTerritoryPenalty
         end
     end
     
@@ -551,7 +590,7 @@ function FreeGangs.Server.Activities.SellDrug(source, targetNetId, drugItem, qua
     end
     
     -- Set NPC cooldown
-    SetNPCCooldown(targetNetId, 'drugSale', FreeGangs.Config.Activities.DrugSales.NPCCooldown or 300)
+    SetNPCCooldown(targetNetId, 'drugSale', FreeGangs.Config.Activities.DrugSales.NPCSaleCooldown or 300)
     
     -- Calculate price
     local basePrice = math.random(drugConfig.minPrice or drugConfig.basePrice * 0.8, 
@@ -564,12 +603,16 @@ function FreeGangs.Server.Activities.SellDrug(source, targetNetId, drugItem, qua
     finalPrice = math.floor(finalPrice * diminishingMult)
     modifiers.diminishing = diminishingMult
     
-    -- Remove drug and give money
+    -- Remove drug and give money (atomic: rollback on failure)
     if not FreeGangs.Bridge.RemoveItem(source, drugItem, quantity) then
         return false, FreeGangs.L('errors', 'generic'), nil
     end
-    
-    FreeGangs.Bridge.AddMoney(source, finalPrice, 'cash', 'drug-sale')
+
+    if not FreeGangs.Bridge.AddMoney(source, finalPrice, 'cash', 'drug-sale') then
+        -- Rollback: give item back
+        FreeGangs.Bridge.AddItem(source, drugItem, quantity)
+        return false, FreeGangs.L('errors', 'generic'), nil
+    end
     
     -- Update stats
     stats.drugSales = stats.drugSales + quantity
@@ -633,9 +676,7 @@ function FreeGangs.Server.Activities.RegisterProtection(source, businessData)
     
     -- Check permission
     if not FreeGangs.Server.HasPermission(source, FreeGangs.Permissions.COLLECT_PROTECTION) then
-        if not gangData.membership.isBoss and gangData.membership.is_boss ~= 1 then
-            return false, FreeGangs.L('general', 'no_permission')
-        end
+        return false, FreeGangs.L('general', 'no_permission')
     end
     
     -- Check zone control requirement
@@ -667,7 +708,10 @@ function FreeGangs.Server.Activities.RegisterProtection(source, businessData)
         business_label = businessData.business_label,
         zone_name = zoneName,
         coords = businessData.coords,
-        payout_base = businessData.payout_base or FreeGangs.Config.Activities.Protection.BasePayout or 500,
+        payout_base = math.random(
+            FreeGangs.Config.Activities.Protection.BasePayoutMin or 200,
+            FreeGangs.Config.Activities.Protection.BasePayoutMax or 800
+        ),
         established_by = citizenid,
     }
     
@@ -716,23 +760,27 @@ function FreeGangs.Server.Activities.CollectProtection(source, businessId)
         return false, FreeGangs.L('activities', 'invalid_target'), nil
     end
     
-    -- Check collection cooldown
-    local collectionCooldown = FreeGangs.Config.Activities.Protection and 
-                               FreeGangs.Config.Activities.Protection.CollectionInterval or 14400
+    -- Check collection cooldown (use CollectionIntervalHours from config)
+    local collectionCooldownHours = FreeGangs.Config.Activities.Protection and
+                                    FreeGangs.Config.Activities.Protection.CollectionIntervalHours or 4
+    local collectionCooldown = collectionCooldownHours * 3600
     local lastCollection = protectionCollections[businessId] or 0
     local now = os.time()
-    
+
     if protection.last_collection then
         local lastDbCollection = FreeGangs.Utils.ParseTimestamp(protection.last_collection)
         if lastDbCollection and lastDbCollection > lastCollection then
             lastCollection = lastDbCollection
         end
     end
-    
+
     if now - lastCollection < collectionCooldown then
         local remaining = collectionCooldown - (now - lastCollection)
         return false, FreeGangs.L('activities', 'protection_not_ready') .. ' (' .. FreeGangs.Utils.FormatDuration(remaining * 1000) .. ')', nil
     end
+
+    -- Immediately claim the slot to prevent TOCTOU race condition
+    protectionCollections[businessId] = now
     
     -- Check zone control
     local zoneName = protection.zone_name
@@ -778,8 +826,7 @@ function FreeGangs.Server.Activities.CollectProtection(source, businessId)
     
     local finalPayout = math.floor(basePayout * multiplier)
     
-    -- Update collection timestamp
-    protectionCollections[businessId] = now
+    -- Persist collection timestamp to database
     FreeGangs.Server.DB.UpdateProtectionCollection(businessId)
     
     -- Give money
@@ -841,7 +888,7 @@ function FreeGangs.Server.AddGangReputation(gangName, amount, citizenid, reason)
         amount = math.floor(amount * multiplierKey)
     end
     
-    local newRep = gang.master_rep + amount
+    local newRep = math.max(0, gang.master_rep + amount)
     FreeGangs.Server.SetGangReputation(gangName, newRep, reason)
 end
 
@@ -936,6 +983,8 @@ end
 -- ============================================================================
 
 CreateThread(function()
+    CleanupNPCCooldowns()
+    CleanupHourlyStats()
     while true do
         Wait(300000)
         CleanupNPCCooldowns()

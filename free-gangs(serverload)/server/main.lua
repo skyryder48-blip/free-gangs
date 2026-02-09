@@ -384,16 +384,16 @@ function FreeGangs.Server.IsOnCooldown(source, cooldownType)
     return false, nil
 end
 
----Get remaining cooldown time formatted
+---Get remaining cooldown time in seconds
 ---@param source number
 ---@param cooldownType string
----@return string
+---@return number seconds remaining (0 if not on cooldown)
 function FreeGangs.Server.GetCooldownRemaining(source, cooldownType)
     local onCooldown, remaining = FreeGangs.Server.IsOnCooldown(source, cooldownType)
     if not onCooldown then
-        return '0:00'
+        return 0
     end
-    return FreeGangs.Utils.FormatDuration(remaining * 1000)
+    return remaining or 0
 end
 
 -- ============================================================================

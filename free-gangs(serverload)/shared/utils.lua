@@ -153,6 +153,7 @@ end
 ---@return string
 function FreeGangs.Utils.FormatNumber(num)
     local formatted = tostring(math.floor(num))
+    local k
     while true do
         formatted, k = formatted:gsub("^(-?%d+)(%d%d%d)", "%1,%2")
         if k == 0 then break end
@@ -311,6 +312,57 @@ else
         result = result:gsub('%%S', string.format('%02d', d.sec))
         return result
     end
+end
+
+---Parse MySQL datetime string to Unix timestamp
+---@param dateStr string MySQL datetime (e.g., "2025-01-15 14:30:00")
+---@return number|nil Unix timestamp
+function FreeGangs.Utils.ParseTimestamp(dateStr)
+    if not dateStr or type(dateStr) ~= 'string' then return nil end
+
+    -- Handle numeric timestamps passed as strings
+    local num = tonumber(dateStr)
+    if num then return num end
+
+    -- Parse MySQL datetime format: YYYY-MM-DD HH:MM:SS
+    local year, month, day, hour, min, sec = dateStr:match("(%d+)-(%d+)-(%d+)%s+(%d+):(%d+):(%d+)")
+    if not year then return nil end
+
+    if IsDuplicityVersion() then
+        return os.time({
+            year = tonumber(year),
+            month = tonumber(month),
+            day = tonumber(day),
+            hour = tonumber(hour),
+            min = tonumber(min),
+            sec = tonumber(sec),
+        })
+    end
+
+    -- Client-side fallback: approximate calculation
+    -- This is less precise but functional for cooldown checks
+    local y = tonumber(year)
+    local m = tonumber(month)
+    local d = tonumber(day)
+    local h = tonumber(hour)
+    local mn = tonumber(min)
+    local s = tonumber(sec)
+
+    -- Days from year
+    local days = 0
+    for i = 1970, y - 1 do
+        days = days + ((i % 4 == 0 and (i % 100 ~= 0 or i % 400 == 0)) and 366 or 365)
+    end
+
+    -- Days from month
+    local isLeap = (y % 4 == 0 and (y % 100 ~= 0 or y % 400 == 0))
+    local daysInMonth = {31, isLeap and 29 or 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31}
+    for i = 1, m - 1 do
+        days = days + daysInMonth[i]
+    end
+    days = days + d - 1
+
+    return days * 86400 + h * 3600 + mn * 60 + s
 end
 
 ---Get time difference in human readable format
@@ -652,9 +704,9 @@ function FreeGangs.Utils.CalculateActivityPoints(activity, archetype)
     local passives = FreeGangs.ArchetypePassiveBonuses[archetype]
     
     if passives then
-        -- Apply archetype bonuses
+        -- Apply archetype bonuses (use math.ceil to ensure bonuses always have effect)
         if activity == FreeGangs.Activities.DRUG_SALE and passives.drugProfit > 0 then
-            result.masterRep = math.floor(result.masterRep * (1 + passives.drugProfit))
+            result.masterRep = math.ceil(result.masterRep * (1 + passives.drugProfit))
         end
         
         if activity == FreeGangs.Activities.GRAFFITI and passives.graffitiLoyalty > 0 then
