@@ -662,9 +662,12 @@ function FreeGangs.Client.Activities.StartDrugSale(targetPed)
     end)
 
     local saleDuration = 2500 + (selectedQuantity - 1) * 250
+    local saleLabel = selectedQuantity > 1
+        and ('"I need ' .. selectedQuantity .. ' of those..."')
+        or '"Let me get one of those..."'
     local success = lib.progressBar({
         duration = saleDuration,
-        label = 'Making the sale...',
+        label = saleLabel,
         useWhileDead = false,
         canCancel = true,
         disable = {
