@@ -107,16 +107,22 @@ CREATE TABLE IF NOT EXISTS `freegangs_graffiti` (
     `zone_name` VARCHAR(50) NULL COMMENT 'Territory where tag is placed',
     `coords` JSON NOT NULL COMMENT '{x, y, z}',
     `rotation` JSON NOT NULL COMMENT '{x, y, z} rotation',
-    `image` VARCHAR(255) NULL COMMENT 'Custom tag image reference',
+    `image_url` VARCHAR(512) NOT NULL DEFAULT '' COMMENT 'URL of graffiti image (nui:// or https://)',
+    `normal_x` FLOAT NOT NULL DEFAULT 0.0 COMMENT 'Surface normal X component',
+    `normal_y` FLOAT NOT NULL DEFAULT 0.0 COMMENT 'Surface normal Y component',
+    `normal_z` FLOAT NOT NULL DEFAULT 0.0 COMMENT 'Surface normal Z component',
+    `scale` FLOAT NOT NULL DEFAULT 1.0 COMMENT 'Graffiti scale multiplier',
+    `width` FLOAT NOT NULL DEFAULT 1.0 COMMENT 'Width in world units (meters)',
+    `height` FLOAT NOT NULL DEFAULT 1.0 COMMENT 'Height in world units (meters)',
     `created_by` VARCHAR(50) NOT NULL COMMENT 'Citizenid of player who sprayed',
     `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     `expires_at` TIMESTAMP NULL COMMENT 'Optional auto-decay timestamp',
-    
+
     INDEX `idx_gang` (`gang_name`),
     INDEX `idx_zone` (`zone_name`),
     INDEX `idx_expires` (`expires_at`),
 
-    CONSTRAINT `fk_graffiti_gang` FOREIGN KEY (`gang_name`) 
+    CONSTRAINT `fk_graffiti_gang` FOREIGN KEY (`gang_name`)
         REFERENCES `freegangs_gangs`(`name`) ON DELETE CASCADE ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 

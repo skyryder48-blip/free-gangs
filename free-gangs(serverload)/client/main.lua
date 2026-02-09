@@ -13,7 +13,6 @@ FreeGangs.Client = FreeGangs.Client or {}
 FreeGangs.Client.Ready = false
 FreeGangs.Client.PlayerGang = nil
 FreeGangs.Client.CurrentZone = nil
-FreeGangs.Client.NearbyGraffiti = {}
 FreeGangs.Client.Zones = {}
 
 -- Cached player ped (updated periodically)
@@ -172,9 +171,6 @@ function FreeGangs.Client.OnEnterZone(zoneName, territory)
         FreeGangs.Bridge.Notify(message, 'inform', 3000)
     end
     
-    -- Load nearby graffiti
-    FreeGangs.Client.LoadNearbyGraffiti()
-    
     FreeGangs.Utils.Debug('Entered zone:', zoneName)
 end
 
@@ -187,10 +183,7 @@ function FreeGangs.Client.OnExitZone(zoneName, territory)
     
     -- Clear current zone
     FreeGangs.Client.CurrentZone = nil
-    
-    -- Clear graffiti
-    FreeGangs.Client.ClearNearbyGraffiti()
-    
+
     FreeGangs.Utils.Debug('Exited zone:', zoneName)
 end
 
@@ -323,55 +316,8 @@ function FreeGangs.Client.RegisterKeybinds()
 end
 
 -- ============================================================================
--- GRAFFITI MANAGEMENT
+-- GRAFFITI MANAGEMENT (delegated to client/module/graffiti.lua)
 -- ============================================================================
-
----Load nearby graffiti
-function FreeGangs.Client.LoadNearbyGraffiti()
-    if not FreeGangs.Client.CurrentZone then return end
-    
-    local graffiti = lib.callback.await(FreeGangs.Callbacks.GET_NEARBY_GRAFFITI, false, 
-        FreeGangs.Bridge.GetPlayerCoords(),
-        FreeGangs.Config.Activities.Graffiti.RenderDistance
-    )
-    
-    if graffiti then
-        for _, tag in pairs(graffiti) do
-            FreeGangs.Client.SpawnGraffiti(tag)
-        end
-    end
-end
-
----Clear nearby graffiti
-function FreeGangs.Client.ClearNearbyGraffiti()
-    for id, data in pairs(FreeGangs.Client.NearbyGraffiti) do
-        FreeGangs.Client.RemoveGraffitiVisual(id)
-    end
-    FreeGangs.Client.NearbyGraffiti = {}
-end
-
----Spawn a graffiti tag in the world
----@param tag table
-function FreeGangs.Client.SpawnGraffiti(tag)
-    -- Store reference for cleanup
-    FreeGangs.Client.NearbyGraffiti[tag.id] = tag
-    
-    -- Visual implementation depends on method chosen
-    -- Using runtime texture replacement (most performant)
-    -- This would be implemented with actual texture loading
-    FreeGangs.Utils.Debug('Spawned graffiti:', tag.id)
-end
-
----Remove a graffiti visual
----@param tagId number
-function FreeGangs.Client.RemoveGraffitiVisual(tagId)
-    local tag = FreeGangs.Client.NearbyGraffiti[tagId]
-    if not tag then return end
-    
-    -- Cleanup visual resources
-    FreeGangs.Client.NearbyGraffiti[tagId] = nil
-    FreeGangs.Utils.Debug('Removed graffiti:', tagId)
-end
 
 -- ============================================================================
 -- UTILITY FUNCTIONS
@@ -563,22 +509,7 @@ RegisterNetEvent(FreeGangs.Events.Client.BRIBE_DUE, function(contactType, hoursR
     })
 end)
 
----Handle graffiti load from server
-RegisterNetEvent(FreeGangs.Events.Client.LOAD_GRAFFITI, function(graffiti)
-    for _, tag in pairs(graffiti) do
-        FreeGangs.Client.SpawnGraffiti(tag)
-    end
-end)
-
----Handle single graffiti add
-RegisterNetEvent(FreeGangs.Events.Client.ADD_GRAFFITI, function(tag)
-    FreeGangs.Client.SpawnGraffiti(tag)
-end)
-
----Handle graffiti removal
-RegisterNetEvent(FreeGangs.Events.Client.REMOVE_GRAFFITI, function(tagId)
-    FreeGangs.Client.RemoveGraffitiVisual(tagId)
-end)
+-- Graffiti events handled by client/module/graffiti.lua (DUI renderer)
 
 -- ============================================================================
 -- RESOURCE CLEANUP
@@ -593,8 +524,6 @@ AddEventHandler('onResourceStop', function(resourceName)
     end
     FreeGangs.Client.Zones = {}
     
-    -- Clear graffiti
-    FreeGangs.Client.ClearNearbyGraffiti()
 end)
 
 -- ============================================================================

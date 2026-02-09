@@ -578,47 +578,75 @@ FreeGangs.Config.Activities = {
         },
     },
     
-    -- Graffiti
+    -- Graffiti (DUI + Scaleform image projection system)
+    -- Requires: generic_texture_renderer_gfx community resource
     Graffiti = {
         -- Required item to spray
         RequiredItem = 'spray_can',
-        
-        -- Item consumed on spray
         ConsumeItem = true,
-        
+
         -- Spray duration in milliseconds
         SprayDuration = 5000,
-        
+
         -- Animation
         Animation = {
             dict = 'switch@franklin@lamar_tagging_wall',
             anim = 'lamar_tagging_wall_loop_lamar',
         },
-        
-        -- Maximum sprays per player per 6 hours
+
+        -- Maximum sprays per player per cycle
         MaxSpraysPerCycle = 6,
         CycleDurationHours = 6,
-        
-        -- Required item to remove graffiti
-        RemovalItem = 'cleaning_kit',
-        
-        -- Removal duration in milliseconds
-        RemovalDuration = 8000,
-        
-        -- Auto-decay settings (set to 0 to disable)
-        AutoDecayDays = 0, -- Tags persist until removed or server restart
-        
-        -- Persist through server restarts (database storage)
-        PersistThroughRestart = true,
-        
-        -- Graffiti visibility distance
-        RenderDistance = 100.0,
-        
-        -- Maximum graffiti per zone
-        MaxPerZone = 20,
 
-        -- Minimum distance between tags (meters)
-        MinDistance = 5.0,
+        -- Removal
+        RemovalItem = 'cleaning_kit',
+        RemovalDuration = 8000,
+
+        -- Rendering
+        RenderDistance = 100.0,    -- Distance to load/unload DUI instances
+        MaxVisibleTags = 20,      -- Maximum simultaneous DUI instances per client
+        DuiResolution = 512,      -- DUI texture resolution (512 = good balance)
+
+        -- Tag dimensions (world units / meters)
+        DefaultScale = 1.0,
+        MinScale = 0.3,
+        MaxScale = 3.0,
+        DefaultWidth = 1.2,       -- Default tag width
+        DefaultHeight = 1.2,      -- Default tag height
+
+        -- Wall offset (meters from surface to prevent z-fighting)
+        WallOffset = 0.03,
+
+        -- Zone limits
+        MaxPerZone = 20,
+        MinDistance = 5.0,        -- Minimum distance between tags
+
+        -- Auto-decay (set DecayDays = 0 to disable)
+        DecayEnabled = false,
+        DecayDays = 0,            -- Days until auto-removal (0 = never)
+
+        -- Heat/rep values for graffiti activities
+        SprayHeat = 5,            -- Player heat for spraying
+        RemovalHeat = 0,          -- Player heat for removing rival tag
+        RemovalLoyaltyLoss = 15,  -- Zone loyalty lost by tag owner on removal
+        RemovalRepDamage = 10,    -- Rep damage to tag owner gang on removal
+
+        -- Default graffiti images (used when gang has no custom images)
+        -- Place PNG/JPG/SVG files in html/images/graffiti/ and reference here
+        -- Use nui://free-gangs/html/images/graffiti/filename.png format
+        DefaultImages = {
+            -- Add your default graffiti images here:
+            -- 'nui://free-gangs/html/images/graffiti/tag_01.png',
+            -- 'nui://free-gangs/html/images/graffiti/tag_02.png',
+        },
+
+        -- Per-gang image overrides (gang_name -> image list)
+        -- Gang leaders can also set custom images via gang settings
+        GangImages = {
+            -- ['ballas'] = {
+            --     'nui://free-gangs/html/images/graffiti/ballas_01.png',
+            -- },
+        },
     },
     
     -- Protection Racket

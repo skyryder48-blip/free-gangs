@@ -423,69 +423,31 @@ function FreeGangs.Server.DB.CreateTerritory(data)
 end
 
 -- ============================================================================
--- GRAFFITI QUERIES
+-- GRAFFITI QUERIES (DUI rendering system)
+-- Primary graffiti operations use the in-memory cache in server/modules/graffiti.lua.
+-- These DB functions are available for direct queries if needed.
 -- ============================================================================
 
----Get graffiti near coordinates
----@param coords table {x, y, z}
----@param radius number
----@return table
-function FreeGangs.Server.DB.GetNearbyGraffiti(coords, radius)
-    local result = MySQL.query.await([[
-        SELECT 
-            id, gang_name, zone_name, coords, rotation, image, created_by, created_at, expires_at
-        FROM freegangs_graffiti
-        WHERE (expires_at IS NULL OR expires_at > CURRENT_TIMESTAMP)
-        AND SQRT(
-            POW(JSON_EXTRACT(coords, '$.x') - ?, 2) +
-            POW(JSON_EXTRACT(coords, '$.y') - ?, 2)
-        ) <= ?
-    ]], { coords.x, coords.y, radius })
-    
-    local graffiti = {}
-    for _, row in pairs(result or {}) do
-        row.coords = row.coords and json.decode(row.coords) or {}
-        row.rotation = row.rotation and json.decode(row.rotation) or {}
-        graffiti[#graffiti + 1] = row
-    end
-    
-    return graffiti
-end
-
----Get graffiti in a zone
----@param zoneName string
----@return table
-function FreeGangs.Server.DB.GetZoneGraffiti(zoneName)
-    local result = MySQL.query.await([[
-        SELECT 
-            id, gang_name, zone_name, coords, rotation, image, created_by, created_at, expires_at
-        FROM freegangs_graffiti
-        WHERE zone_name = ? AND (expires_at IS NULL OR expires_at > CURRENT_TIMESTAMP)
-    ]], { zoneName })
-    
-    local graffiti = {}
-    for _, row in pairs(result or {}) do
-        row.coords = row.coords and json.decode(row.coords) or {}
-        row.rotation = row.rotation and json.decode(row.rotation) or {}
-        graffiti[#graffiti + 1] = row
-    end
-    
-    return graffiti
-end
-
----Create graffiti
+---Create graffiti (with DUI rendering columns)
 ---@param data table
 ---@return number|nil
 function FreeGangs.Server.DB.CreateGraffiti(data)
     return MySQL.insert.await([[
-        INSERT INTO freegangs_graffiti (gang_name, zone_name, coords, rotation, image, created_by, expires_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO freegangs_graffiti
+            (gang_name, zone_name, coords, rotation, image_url, normal_x, normal_y, normal_z, scale, width, height, created_by, expires_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ]], {
         data.gang_name,
         data.zone_name,
         json.encode(data.coords),
         json.encode(data.rotation),
-        data.image,
+        data.image_url or '',
+        data.normal_x or 0.0,
+        data.normal_y or 0.0,
+        data.normal_z or 0.0,
+        data.scale or 1.0,
+        data.width or 1.0,
+        data.height or 1.0,
         data.created_by,
         data.expires_at,
     })
@@ -495,18 +457,6 @@ end
 ---@param graffitiId number
 function FreeGangs.Server.DB.DeleteGraffiti(graffitiId)
     MySQL.query.await('DELETE FROM freegangs_graffiti WHERE id = ?', { graffitiId })
-end
-
----Count gang graffiti in zone
----@param gangName string
----@param zoneName string
----@return number
-function FreeGangs.Server.DB.CountGangGraffitiInZone(gangName, zoneName)
-    return MySQL.scalar.await([[
-        SELECT COUNT(*) FROM freegangs_graffiti 
-        WHERE gang_name = ? AND zone_name = ? 
-        AND (expires_at IS NULL OR expires_at > CURRENT_TIMESTAMP)
-    ]], { gangName, zoneName }) or 0
 end
 
 -- ============================================================================

@@ -12,6 +12,7 @@
 local activeMuggings = {}     -- source -> { targetNetId, startTime }
 local activePickpockets = {}  -- source -> { targetNetId, startTime }
 local activeDrugSales = {}    -- source -> { targetNetId, startTime }
+local activeGraffiti = {}     -- source -> { startTime, coords }
 
 -- ============================================================================
 -- ACTIVITY VALIDATION CALLBACKS
@@ -323,14 +324,34 @@ end)
 -- GRAFFITI CALLBACKS
 -- ============================================================================
 
----Spray graffiti
-lib.callback.register('freegangs:graffiti:spray', function(source, coords, rotation, image)
-    return FreeGangs.Server.Graffiti.Spray(source, coords, rotation, image)
+---Spray graffiti (with anti-cheat timing validation)
+lib.callback.register('freegangs:graffiti:spray', function(source, sprayData)
+    if not sprayData or type(sprayData) ~= 'table' then return false, 'Invalid data' end
+
+    -- Validate that graffiti was started via server event
+    local tracking = activeGraffiti[source]
+    if not tracking then return false, 'No active graffiti session' end
+
+    -- Validate minimum time (progress bar is 5 seconds by default)
+    local elapsed = FreeGangs.Utils.GetTimestamp() - tracking.startTime
+    if elapsed < 3 then return false, 'Too fast' end
+
+    -- Clear tracking
+    activeGraffiti[source] = nil
+
+    return FreeGangs.Server.Graffiti.Spray(source, sprayData)
 end)
 
 ---Remove graffiti
 lib.callback.register('freegangs:graffiti:remove', function(source, tagId)
     return FreeGangs.Server.Graffiti.Remove(source, tagId)
+end)
+
+---Get available graffiti images for player's gang
+lib.callback.register('freegangs:graffiti:getImages', function(source)
+    local gangData = FreeGangs.Server.GetPlayerGangData(source)
+    if not gangData then return {} end
+    return FreeGangs.Server.Graffiti.GetGangImages(gangData.gang.name)
 end)
 
 ---Get nearby graffiti
@@ -480,9 +501,12 @@ RegisterNetEvent('freegangs:server:cancelDrugSale', function()
     FreeGangs.Utils.Debug('Player', source, 'cancelled drug sale')
 end)
 
--- Handle graffiti start
+-- Handle graffiti start (track for completion validation)
 RegisterNetEvent('freegangs:server:startGraffiti', function(coords)
     local source = source
+    if coords and type(coords) == 'table' then
+        activeGraffiti[source] = { startTime = FreeGangs.Utils.GetTimestamp(), coords = coords }
+    end
     FreeGangs.Utils.Debug('Player', source, 'starting graffiti at', json.encode(coords))
 end)
 
@@ -492,6 +516,7 @@ AddEventHandler('playerDropped', function()
     activeMuggings[source] = nil
     activePickpockets[source] = nil
     activeDrugSales[source] = nil
+    activeGraffiti[source] = nil
 end)
 
 -- ============================================================================
@@ -499,19 +524,29 @@ end)
 -- ============================================================================
 
 if FreeGangs.Config.General.Debug then
-    -- Test spray command
+    -- Test spray command (bypasses anti-cheat timing for debug)
     RegisterCommand('fg_spray', function(source, args)
         if source == 0 then return end
-        
+
         local ped = GetPlayerPed(source)
         local coords = GetEntityCoords(ped)
-        
+
+        -- Set up anti-cheat tracking so spray doesn't fail
+        activeGraffiti[source] = { startTime = FreeGangs.Utils.GetTimestamp() - 10, coords = { x = coords.x, y = coords.y, z = coords.z } }
+
         local success, message, result = FreeGangs.Server.Graffiti.Spray(
             source,
-            { x = coords.x, y = coords.y, z = coords.z },
-            { x = 0, y = 0, z = GetEntityHeading(ped) }
+            {
+                coords = { x = coords.x, y = coords.y, z = coords.z },
+                normal = { x = 0, y = 1, z = 0 },
+                image_url = args[1] or '',
+                scale = 1.0,
+                width = 1.2,
+                height = 1.2,
+            }
         )
-        
+
+        activeGraffiti[source] = nil
         FreeGangs.Bridge.Notify(source, message, success and 'success' or 'error')
         print('[free-gangs:debug] Spray result:', success, message, json.encode(result or {}))
     end, false)

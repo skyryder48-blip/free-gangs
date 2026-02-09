@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+        background: transparent;
+        overflow: hidden;
+        width: 100vw;
+        height: 100vh;
+    }
+    #graffiti {
+        width: 100%;
+        height: 100%;
+        object-fit: contain;
+        display: none;
+        pointer-events: none;
+    }
+</style>
+</head>
+<body>
+    <img id="graffiti" />
+    <script>
+        const img = document.getElementById('graffiti');
+        window.addEventListener('message', function(e) {
+            if (!e.data || !e.data.action) return;
+            if (e.data.action === 'setImage' && e.data.url) {
+                img.src = e.data.url;
+                img.style.display = 'block';
+            } else if (e.data.action === 'hide') {
+                img.style.display = 'none';
+                img.src = '';
+            }
+        });
+    </script>
+</body>
+</html>
