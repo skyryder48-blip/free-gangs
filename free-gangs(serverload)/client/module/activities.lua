@@ -608,10 +608,18 @@ function FreeGangs.Client.Activities.StartDrugSale(targetPed)
     local targetCoords = GetEntityCoords(targetPed)
     TaskTurnPedToFaceCoord(ped, targetCoords.x, targetCoords.y, targetCoords.z, 1000)
 
-    -- NPC turns to face player
+    -- NPC turns to face player, nervous look-around before deal
     if DoesEntityExist(targetPed) and not IsPedDeadOrDying(targetPed) then
         TaskTurnPedToFaceEntity(targetPed, ped, 800)
         Wait(800)
+        -- NPC looks around nervously before accepting
+        if DoesEntityExist(targetPed) and not IsPedDeadOrDying(targetPed) then
+            lib.requestAnimDict('amb@world_human_stand_impatient@male@no_sign@idle_a')
+            TaskPlayAnim(targetPed, 'amb@world_human_stand_impatient@male@no_sign@idle_a', 'idle_a', 8.0, -8.0, 1500, 49, 0, false, false, false)
+            Wait(1500)
+            RemoveAnimDict('amb@world_human_stand_impatient@male@no_sign@idle_a')
+            ClearPedTasks(targetPed)
+        end
     else
         Wait(500)
     end
@@ -632,8 +640,9 @@ function FreeGangs.Client.Activities.StartDrugSale(targetPed)
         end
     end)
 
+    local saleDuration = 2500 + (selectedQuantity - 1) * 250
     local success = lib.progressBar({
-        duration = 2500,
+        duration = saleDuration,
         label = 'Making the sale...',
         useWhileDead = false,
         canCancel = true,
@@ -671,6 +680,7 @@ function FreeGangs.Client.Activities.StartDrugSale(targetPed)
                     lib.requestAnimDict('mp_common')
                     TaskPlayAnim(targetPed, 'mp_common', 'givetake1_b', 8.0, -8.0, 2000, 49, 0, false, false, false)
                     Wait(2000)
+                    RemoveAnimDict('mp_common')
                     if DoesEntityExist(targetPed) and not IsPedDeadOrDying(targetPed) then
                         ClearPedTasks(targetPed)
                         TaskWanderStandard(targetPed, 10.0, 10)
@@ -687,6 +697,7 @@ function FreeGangs.Client.Activities.StartDrugSale(targetPed)
                     lib.requestAnimDict('gestures@m@standing@casual')
                     TaskPlayAnim(targetPed, 'gestures@m@standing@casual', 'gesture_head_no', 8.0, -8.0, 2000, 49, 0, false, false, false)
                     Wait(2000)
+                    RemoveAnimDict('gestures@m@standing@casual')
                     if DoesEntityExist(targetPed) and not IsPedDeadOrDying(targetPed) then
                         ClearPedTasks(targetPed)
                         TaskWanderStandard(targetPed, 10.0, 10)

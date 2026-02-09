@@ -43,6 +43,12 @@ lib.callback.register(FreeGangs.Callbacks.CAN_PERFORM_ACTIVITY, function(source,
         return true
         
     elseif activity == 'drug_sale' then
+        -- Check player cooldown
+        local drugCooldown = FreeGangs.Server.GetCooldownRemaining(source, 'drug_sale')
+        if drugCooldown > 0 then
+            return false, FreeGangs.L('activities', 'on_cooldown', FreeGangs.Utils.FormatDuration(drugCooldown * 1000))
+        end
+
         -- Check time restriction using server-side game time (don't trust client)
         local gameHour = GetClockHours and GetClockHours() or 12
         local startHour = FreeGangs.Config.Activities.DrugSales.AllowedStartHour
@@ -205,7 +211,11 @@ lib.callback.register('freegangs:activities:completeDrugSale', function(source, 
     -- Clear tracking
     activeDrugSales[source] = nil
 
-    return FreeGangs.Server.Activities.SellDrug(source, targetNetId, drugItem, quantity or 1)
+    -- Sanitize quantity (clamp to 1-10)
+    quantity = tonumber(quantity) or 1
+    quantity = math.max(1, math.min(math.floor(quantity), 10))
+
+    return FreeGangs.Server.Activities.SellDrug(source, targetNetId, drugItem, quantity)
 end)
 
 ---Get player's drug inventory
@@ -401,8 +411,15 @@ lib.callback.register('freegangs:activities:getCooldowns', function(source)
         }
     end
     
-    -- Add other activity cooldowns as needed
-    
+    -- Drug sale cooldown
+    local drugSaleRemaining = FreeGangs.Server.GetCooldownRemaining(source, 'drug_sale')
+    if drugSaleRemaining > 0 then
+        cooldowns.drug_sale = {
+            remaining = drugSaleRemaining,
+            formatted = FreeGangs.Utils.FormatDuration(drugSaleRemaining * 1000),
+        }
+    end
+
     return cooldowns
 end)
 
