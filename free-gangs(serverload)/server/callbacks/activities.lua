@@ -133,7 +133,7 @@ end)
 -- ============================================================================
 
 ---Process pickpocket completion
-lib.callback.register('freegangs:activities:completePickpocket', function(source, targetNetId, success)
+lib.callback.register('freegangs:activities:completePickpocket', function(source, targetNetId, successfulRolls)
     if not targetNetId or type(targetNetId) ~= 'number' then return false, 'Invalid target' end
 
     -- Validate that pickpocket was started via server event
@@ -141,24 +141,22 @@ lib.callback.register('freegangs:activities:completePickpocket', function(source
     if not tracking then return false, 'No active pickpocket' end
     if tracking.targetNetId ~= targetNetId then return false, 'Target mismatch' end
 
-    -- Validate minimum time (each roll is 2 seconds)
-    local elapsed = os.time() - tracking.startTime
-    if elapsed < 1 then return false, 'Too fast' end
-
     -- Clear tracking
     activePickpockets[source] = nil
 
-    -- Validate client success claim: if they claim all rolls succeeded,
-    -- check enough time passed for the configured number of rolls
-    if success then
-        local config = FreeGangs.Config.Activities.Pickpocket
-        local rolls = config and config.LootRolls or 3
-        if elapsed < rolls then
-            success = false -- Too fast for all rolls
-        end
+    -- Sanitize successfulRolls
+    successfulRolls = tonumber(successfulRolls) or 0
+    local config = FreeGangs.Config.Activities.Pickpocket
+    local maxRolls = config and config.LootRolls or 3
+    successfulRolls = math.max(0, math.min(math.floor(successfulRolls), maxRolls))
+
+    -- Validate timing: each roll takes ~2 seconds client-side, require >= 1s per claimed roll
+    local elapsed = os.time() - tracking.startTime
+    if successfulRolls > 0 and elapsed < successfulRolls then
+        successfulRolls = math.max(0, math.floor(elapsed)) -- Clamp to plausible rolls
     end
 
-    return FreeGangs.Server.Activities.Pickpocket(source, targetNetId, success)
+    return FreeGangs.Server.Activities.Pickpocket(source, targetNetId, successfulRolls)
 end)
 
 ---Validate pickpocket target

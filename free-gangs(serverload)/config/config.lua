@@ -257,6 +257,10 @@ FreeGangs.Config.Activities = {
 
         -- Cooldown before can attempt on same NPC again (even after failure)
         NPCCooldown = 1800, -- 30 minutes
+
+        -- Per-roll NPC detection chance (escalates each roll)
+        DetectionChanceBase = 10, -- 10% on first roll
+        DetectionChancePerRoll = 10, -- +10% per subsequent roll (roll 2 = 20%, roll 3 = 30%)
     },
     
     -- Drug Sales

@@ -372,40 +372,50 @@ function FreeGangs.Client.Activities.StartPickpocket(targetPed)
         FreeGangs.Bridge.Notify(FreeGangs.L('errors', 'generic'), 'error')
         return
     end
-    
+
+    -- Exploit guards
+    local ped = FreeGangs.Client.GetPlayerPed()
+    if IsPedInAnyVehicle(ped, false) or IsEntityDead(ped) then return end
+
     local targetNetId = NetworkGetNetworkIdFromEntity(targetPed)
     local canPickpocket, errorMsg = lib.callback.await('freegangs:activities:validatePickpocketTarget', false, targetNetId)
-    
+
     if not canPickpocket then
         FreeGangs.Bridge.Notify(errorMsg, 'error')
         return
     end
-    
+
     SetBusy(true)
-    
+
     TriggerServerEvent('freegangs:server:startPickpocket', targetNetId)
-    
-    local ped = FreeGangs.Client.GetPlayerPed()
+
     local config = FreeGangs.Config.Activities.Pickpocket
     local maxDistance = config.MaxDistance or 2.0
     local rolls = config.LootRolls or 3
+    local baseDetectChance = config.DetectionChanceBase or 10
+    local detectPerRoll = config.DetectionChancePerRoll or 10
     local successfulRolls = 0
-    
+    local detected = false
+
     for roll = 1, rolls do
-        -- Check distance
+        -- Check NPC still exists and is alive
+        if not DoesEntityExist(targetPed) or IsPedDeadOrDying(targetPed) then
+            FreeGangs.Bridge.Notify('Target is no longer available', 'error')
+            break
+        end
+
+        -- Check distance before roll
         local playerCoords = GetEntityCoords(ped)
         local targetCoords = GetEntityCoords(targetPed)
-        local distance = #(playerCoords - targetCoords)
-        
-        if distance > maxDistance then
+        if #(playerCoords - targetCoords) > maxDistance then
             FreeGangs.Bridge.Notify(FreeGangs.L('activities', 'too_far'), 'error')
             break
         end
-        
+
         -- Sneak animation
         PlayAnim('anim@amb@clubhouse@tutorial@bkr_tut_ig3@', 'machinic_loop_mechandplayer', -1, 49)
-        
-        -- Progress bar with distance check
+
+        -- Progress bar
         local success = lib.progressBar({
             duration = 2000,
             label = string.format('Pickpocketing (%d/%d)...', roll, rolls),
@@ -417,54 +427,83 @@ function FreeGangs.Client.Activities.StartPickpocket(targetPed)
                 combat = true,
             },
         })
-        
+
         if not success then
             StopAnim()
             FreeGangs.Bridge.Notify('Pickpocket cancelled', 'warning')
             break
         end
-        
-        -- Recheck distance
+
+        -- Recheck NPC exists and is alive
+        if not DoesEntityExist(targetPed) or IsPedDeadOrDying(targetPed) then
+            StopAnim()
+            FreeGangs.Bridge.Notify('Target is no longer available', 'error')
+            break
+        end
+
+        -- Recheck distance after roll
         playerCoords = GetEntityCoords(ped)
         targetCoords = GetEntityCoords(targetPed)
-        distance = #(playerCoords - targetCoords)
-        
-        if distance > maxDistance then
-            -- Failed due to distance
+        if #(playerCoords - targetCoords) > maxDistance then
             StopAnim()
+            detected = true
             FreeGangs.Bridge.Notify(FreeGangs.L('activities', 'pickpocket_detected'), 'error')
-            
-            -- NPC reacts aggressively
             TriggerNPCReaction(targetPed, 'aggressive')
-            
-            -- Report failure to server
-            lib.callback.await('freegangs:activities:completePickpocket', false, targetNetId, false)
-            
-            SetBusy(false)
-            return
+            break
         end
-        
+
+        -- Per-roll detection chance (escalates: roll 1 = base, roll 2 = base+per, etc.)
+        local detectChance = baseDetectChance + (detectPerRoll * (roll - 1))
+        if math.random(100) <= detectChance then
+            StopAnim()
+            detected = true
+            FreeGangs.Bridge.Notify(FreeGangs.L('activities', 'pickpocket_detected'), 'error')
+            TriggerNPCReaction(targetPed, 'aggressive')
+            break
+        end
+
         successfulRolls = successfulRolls + 1
     end
-    
+
     StopAnim()
-    
-    if successfulRolls > 0 then
-        -- Complete pickpocket on server
-        local pickSuccess, message, rewards = lib.callback.await('freegangs:activities:completePickpocket', false, targetNetId, true)
-        
-        if pickSuccess then
-            FreeGangs.Bridge.Notify(message, 'success')
-        else
-            FreeGangs.Bridge.Notify(message, 'error')
-            
-            -- Detection
-            if rewards and rewards.detected then
-                TriggerNPCReaction(targetPed, 'aggressive')
-            end
+
+    -- Always report to server with rolls completed (fixes stale tracking bug)
+    local pickSuccess, message, rewards = lib.callback.await(
+        'freegangs:activities:completePickpocket', false,
+        targetNetId, successfulRolls
+    )
+
+    if pickSuccess then
+        FreeGangs.Bridge.Notify(message, 'success')
+
+        -- Post-pickpocket NPC reaction: delayed confusion
+        if DoesEntityExist(targetPed) and not detected then
+            CreateThread(function()
+                Wait(2000)
+                if not DoesEntityExist(targetPed) or IsPedDeadOrDying(targetPed) then return end
+                -- NPC checks pockets, confused
+                ClearPedTasks(targetPed)
+                lib.requestAnimDict('gestures@m@standing@casual')
+                TaskPlayAnim(targetPed, 'gestures@m@standing@casual', 'gesture_shrug_hard', 8.0, -8.0, 3000, 49, 0, false, false, false)
+                Wait(3000)
+                if not DoesEntityExist(targetPed) or IsPedDeadOrDying(targetPed) then return end
+                -- NPC looks around suspiciously
+                TaskStartScenarioInPlace(targetPed, 'WORLD_HUMAN_STAND_IMPATIENT', 0, true)
+                Wait(4000)
+                if DoesEntityExist(targetPed) and not IsPedDeadOrDying(targetPed) then
+                    ClearPedTasks(targetPed)
+                end
+            end)
+        end
+    else
+        FreeGangs.Bridge.Notify(message, 'error')
+
+        -- Server-reported detection (e.g. too-fast validation)
+        if rewards and rewards.detected and DoesEntityExist(targetPed) and not detected then
+            TriggerNPCReaction(targetPed, 'aggressive')
         end
     end
-    
+
     SetBusy(false)
 end
 

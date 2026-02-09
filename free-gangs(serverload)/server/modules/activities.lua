@@ -362,19 +362,21 @@ end
 ---@return boolean success
 ---@return string message
 ---@return table|nil rewards
-function FreeGangs.Server.Activities.Pickpocket(source, targetNetId, success)
+function FreeGangs.Server.Activities.Pickpocket(source, targetNetId, successfulRolls)
+    successfulRolls = tonumber(successfulRolls) or 0
+
     -- Validate player
     local citizenid = FreeGangs.Bridge.GetCitizenId(source)
     if not citizenid then
         return false, FreeGangs.L('errors', 'not_loaded'), nil
     end
-    
+
     -- Check gang membership
     local gangData = FreeGangs.Server.GetPlayerGangData(source)
     if not gangData then
         return false, FreeGangs.L('gangs', 'not_in_gang'), nil
     end
-    
+
     -- Check player cooldown
     local cooldownRemaining = FreeGangs.Server.GetCooldownRemaining(source, 'pickpocket')
     if cooldownRemaining > 0 then
@@ -386,18 +388,17 @@ function FreeGangs.Server.Activities.Pickpocket(source, targetNetId, success)
         return false, FreeGangs.L('activities', 'invalid_target'), nil
     end
 
-    -- Set NPC cooldown regardless of success
+    -- Set NPC cooldown regardless of outcome
     SetNPCCooldown(targetNetId, 'pickpocket', FreeGangs.Config.Activities.Pickpocket.NPCCooldown)
 
     local activityPoints = FreeGangs.ActivityPoints[FreeGangs.Activities.PICKPOCKET]
     local currentZone = FreeGangs.Server.GetPlayerZone(source)
 
-    if not success then
-        -- Failed pickpocket - add heat and potentially alert police
+    if successfulRolls <= 0 then
+        -- Failed pickpocket (0 rolls completed) - add heat
         local failHeat = FreeGangs.Config.Heat.Points.PickpocketFail
         FreeGangs.Server.AddPlayerHeat(citizenid, failHeat)
 
-        -- Log failure
         FreeGangs.Server.DB.Log(gangData.gang.name, citizenid, 'pickpocket_fail', FreeGangs.LogCategories.ACTIVITY, {
             targetNetId = targetNetId,
             zone = currentZone,
@@ -406,26 +407,30 @@ function FreeGangs.Server.Activities.Pickpocket(source, targetNetId, success)
         return false, FreeGangs.L('activities', 'pickpocket_fail'), { heat = failHeat, detected = true }
     end
 
-    -- Successful pickpocket
+    -- Successful pickpocket - scale loot by rolls completed
     local config = FreeGangs.Config.Activities.Pickpocket
-    local items, cash = GenerateLoot(config.LootTable, config.LootRolls)
+    local maxRolls = config.LootRolls or 3
+    successfulRolls = math.min(successfulRolls, maxRolls)
 
-    -- Award loot
+    local items, cash = GenerateLoot(config.LootTable, successfulRolls)
+
     AwardLoot(source, items, cash)
 
-    -- Set player cooldown after successful pickpocket
+    -- Set player cooldown after any successful rolls
     FreeGangs.Server.SetCooldown(source, 'pickpocket', config.PlayerCooldown or 120)
 
-    -- Add reputation
-    local repAmount = activityPoints.masterRep
+    -- Scale reputation by rolls completed (partial success = partial rep)
+    local rollRatio = successfulRolls / maxRolls
+    local repAmount = math.ceil(activityPoints.masterRep * rollRatio)
     FreeGangs.Server.AddGangReputation(gangData.gang.name, repAmount, citizenid, 'pickpocket')
 
-    -- Add zone influence
+    -- Scale zone influence by rolls completed
     if currentZone then
-        AddZoneInfluence(currentZone, gangData.gang.name, activityPoints.zoneInfluence)
+        local influenceAmount = math.ceil(activityPoints.zoneInfluence * rollRatio)
+        AddZoneInfluence(currentZone, gangData.gang.name, influenceAmount)
     end
 
-    -- Add heat
+    -- Add heat (flat - you attempted it regardless)
     local heatAmount = activityPoints.heat
     if heatAmount > 0 then
         FreeGangs.Server.AddPlayerHeat(citizenid, heatAmount)
@@ -435,20 +440,21 @@ function FreeGangs.Server.Activities.Pickpocket(source, targetNetId, success)
     local stats = GetPlayerHourlyStats(citizenid)
     stats.pickpockets = stats.pickpockets + 1
 
-    -- Log success
     FreeGangs.Server.DB.Log(gangData.gang.name, citizenid, 'pickpocket_success', FreeGangs.LogCategories.ACTIVITY, {
         targetNetId = targetNetId,
         cash = cash,
         items = items,
+        rolls = successfulRolls,
+        maxRolls = maxRolls,
         zone = currentZone,
     })
 
-    local lootDisplay = FormatLootDisplay(items, cash)
     return true, FreeGangs.L('activities', 'pickpocket_success'), {
         cash = cash,
         items = items,
         rep = repAmount,
         heat = heatAmount,
+        rolls = successfulRolls,
     }
 end
 
