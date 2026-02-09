@@ -189,6 +189,27 @@ end)
 -- DRUG SALE CALLBACKS
 -- ============================================================================
 
+---Validate drug sale target (pre-check before progress bar)
+lib.callback.register('freegangs:activities:validateDrugSaleTarget', function(source, targetNetId)
+    if not targetNetId or type(targetNetId) ~= 'number' then return false, 'Invalid target' end
+
+    local citizenid = FreeGangs.Bridge.GetCitizenId(source)
+    if not citizenid then return false, 'Not loaded' end
+
+    -- Check player cooldown
+    local drugCooldown = FreeGangs.Server.GetCooldownRemaining(source, 'drug_sale')
+    if drugCooldown > 0 then
+        return false, FreeGangs.L('activities', 'on_cooldown', FreeGangs.Utils.FormatDuration(drugCooldown * 1000))
+    end
+
+    -- Check NPC cooldown (permanent block after any transaction)
+    if FreeGangs.Server.Activities.IsNPCOnCooldown(targetNetId, 'drugSale') then
+        return false, FreeGangs.L('activities', 'invalid_target')
+    end
+
+    return true
+end)
+
 ---Process drug sale
 lib.callback.register('freegangs:activities:completeDrugSale', function(source, targetNetId, drugItem, quantity)
     -- Validate parameters

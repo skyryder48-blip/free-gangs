@@ -620,9 +620,16 @@ function FreeGangs.Client.Activities.StartDrugSale(targetPed)
         return
     end
 
+    -- Pre-validate target on server (check NPC cooldown + player cooldown before committing)
+    local targetNetId = NetworkGetNetworkIdFromEntity(targetPed)
+    local targetValid, targetMsg = lib.callback.await('freegangs:activities:validateDrugSaleTarget', false, targetNetId)
+    if not targetValid then
+        FreeGangs.Bridge.Notify(targetMsg or 'Target unavailable', 'error')
+        return
+    end
+
     SetBusy(true)
 
-    local targetNetId = NetworkGetNetworkIdFromEntity(targetPed)
     TriggerServerEvent('freegangs:server:startDrugSale', targetNetId)
 
     -- Face target
@@ -662,9 +669,28 @@ function FreeGangs.Client.Activities.StartDrugSale(targetPed)
     end)
 
     local saleDuration = 2500 + (selectedQuantity - 1) * 250
-    local saleLabel = selectedQuantity > 1
-        and ('"I need ' .. selectedQuantity .. ' of those..."')
-        or '"Let me get one of those..."'
+
+    -- Randomized diegetic buyer dialogue
+    local saleLabel
+    if selectedQuantity > 1 then
+        local multiLines = {
+            '"I need ' .. selectedQuantity .. ' of those..."',
+            '"Hook me up with ' .. selectedQuantity .. '..."',
+            '"Got ' .. selectedQuantity .. ' for me?"',
+            '"Let me get ' .. selectedQuantity .. ' off you..."',
+            '"I\'ll take ' .. selectedQuantity .. '..."',
+        }
+        saleLabel = multiLines[math.random(#multiLines)]
+    else
+        local singleLines = {
+            '"Let me get one of those..."',
+            '"Hook me up..."',
+            '"You holding? I need one..."',
+            '"Just one, quick..."',
+            '"Got anything for me?"',
+        }
+        saleLabel = singleLines[math.random(#singleLines)]
+    end
     local success = lib.progressBar({
         duration = saleDuration,
         label = saleLabel,
@@ -694,6 +720,18 @@ function FreeGangs.Client.Activities.StartDrugSale(targetPed)
             if rewards then
                 if rewards.rep and rewards.rep > 0 then
                     FreeGangs.Bridge.Notify('+' .. rewards.rep .. ' reputation', 'inform', 3000)
+                end
+
+                -- Diegetic diminishing returns warning
+                if rewards.diminishing and rewards.diminishing < 0.8 then
+                    local warningLines = {
+                        '"Prices are dropping around here..."',
+                        '"Market\'s getting flooded, man..."',
+                        '"People ain\'t paying like they used to..."',
+                        '"Too much product on the street..."',
+                    }
+                    Wait(1500)
+                    FreeGangs.Bridge.Notify(warningLines[math.random(#warningLines)], 'warning', 4000)
                 end
             end
 

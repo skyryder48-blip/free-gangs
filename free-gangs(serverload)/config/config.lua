@@ -303,6 +303,18 @@ FreeGangs.Config.Activities = {
             'ecstasy',
         },
 
+        -- Per-drug pricing (minPrice to maxPrice range per unit)
+        Drugs = {
+            weed_brick  = { basePrice = 40,  minPrice = 25,  maxPrice = 55 },
+            coke_brick  = { basePrice = 120, minPrice = 90,  maxPrice = 160 },
+            meth        = { basePrice = 100, minPrice = 75,  maxPrice = 135 },
+            crack       = { basePrice = 80,  minPrice = 55,  maxPrice = 110 },
+            heroin      = { basePrice = 130, minPrice = 95,  maxPrice = 170 },
+            oxy         = { basePrice = 70,  minPrice = 50,  maxPrice = 95 },
+            lsd         = { basePrice = 60,  minPrice = 40,  maxPrice = 85 },
+            ecstasy     = { basePrice = 55,  minPrice = 35,  maxPrice = 80 },
+        },
+
         -- Ped models that always deny sales and alert police
         -- Law enforcement, emergency services, military, security
         BlacklistedPedModels = {
@@ -833,7 +845,7 @@ FreeGangs.Config.Messages = {
     MuggingSuccess = 'Mugging successful! Got %s',
     PickpocketSuccess = 'Pickpocket successful!',
     PickpocketFail = 'Pickpocket failed! You\'ve been spotted!',
-    DrugSaleSuccess = 'Sold %s for %s',
+    DrugSaleSuccess = 'Sold %dx %s for %s',
     DrugSaleFail = 'Customer rejected the deal.',
     GraffitiSprayed = 'Tag sprayed! +%d zone influence',
     GraffitiRemoved = 'Rival tag removed!',

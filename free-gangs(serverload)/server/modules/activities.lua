@@ -670,13 +670,14 @@ function FreeGangs.Server.Activities.SellDrug(source, targetNetId, drugItem, qua
     end
 
     local drugLabel = FreeGangs.Bridge.GetItemLabel(drugItem) or drugItem
-    return true, FreeGangs.L('activities', 'drug_sale_success', drugLabel, FreeGangs.Bridge.FormatMoney(finalPrice)), {
+    return true, FreeGangs.L('activities', 'drug_sale_success', quantity, drugLabel, FreeGangs.Bridge.FormatMoney(finalPrice)), {
         drug = drugItem,
         quantity = quantity,
         price = finalPrice,
         modifiers = modifiers,
         rep = repAmount,
         heat = heatAmount,
+        diminishing = diminishingMult,
     }
 end
 
