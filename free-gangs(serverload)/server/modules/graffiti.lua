@@ -59,7 +59,7 @@ end
 ---Get current cycle timestamp (start of current 6-hour period)
 ---@return number timestamp
 local function GetCurrentCycleStart()
-    local now = os.time()
+    local now = FreeGangs.Utils.GetTimestamp()
     return now - (now % CYCLE_DURATION)
 end
 
@@ -293,7 +293,7 @@ function FreeGangs.Server.Graffiti.Spray(source, coords, rotation, image)
         rotation = rotation,
         image = image,
         created_by = citizenid,
-        created_at = os.time(),
+        created_at = FreeGangs.Utils.GetTimestamp(),
     }
     
     -- Add to cache
@@ -329,7 +329,7 @@ function FreeGangs.Server.Graffiti.Spray(source, coords, rotation, image)
             -- Update GlobalState for clients
             GlobalState['territory:' .. zoneName] = {
                 influence = territory.influence,
-                updated = os.time(),
+                updated = FreeGangs.Utils.GetTimestamp(),
             }
         end
     end
@@ -425,7 +425,7 @@ function FreeGangs.Server.Graffiti.Remove(source, tagId, isTagOver)
             -- Update GlobalState
             GlobalState['territory:' .. zoneName] = {
                 influence = territory.influence,
-                updated = os.time(),
+                updated = FreeGangs.Utils.GetTimestamp(),
             }
         end
     end

@@ -89,7 +89,7 @@ end
 
 ---Clean up expired NPC cooldowns
 local function CleanupNPCCooldowns()
-    local now = os.time()
+    local now = FreeGangs.Utils.GetTimestamp()
     
     for category, cooldowns in pairs(npcCooldowns) do
         for netId, expiry in pairs(cooldowns) do
@@ -102,7 +102,7 @@ end
 
 ---Clean up old hourly stats
 local function CleanupHourlyStats()
-    local currentHour = math.floor(os.time() / 3600)
+    local currentHour = math.floor(FreeGangs.Utils.GetTimestamp() / 3600)
     
     for citizenid, data in pairs(playerHourlyStats) do
         if data.hour ~= currentHour then
@@ -115,7 +115,7 @@ end
 ---@param citizenid string
 ---@return table
 local function GetPlayerHourlyStats(citizenid)
-    local currentHour = math.floor(os.time() / 3600)
+    local currentHour = math.floor(FreeGangs.Utils.GetTimestamp() / 3600)
     
     if not playerHourlyStats[citizenid] or playerHourlyStats[citizenid].hour ~= currentHour then
         playerHourlyStats[citizenid] = {
@@ -154,7 +154,7 @@ local function IsNPCOnCooldown(netId, activity)
     if not cooldowns then return false end
     
     local expiry = cooldowns[netId]
-    return expiry and os.time() < expiry
+    return expiry and FreeGangs.Utils.GetTimestamp() < expiry
 end
 
 ---Check if NPC is on cooldown (exposed for callback validation)
@@ -171,7 +171,7 @@ end
 ---@param seconds number
 local function SetNPCCooldown(netId, activity, seconds)
     npcCooldowns[activity] = npcCooldowns[activity] or {}
-    npcCooldowns[activity][netId] = os.time() + seconds
+    npcCooldowns[activity][netId] = FreeGangs.Utils.GetTimestamp() + seconds
 end
 
 ---Generate loot from loot table
@@ -288,7 +288,7 @@ local function TriggerDispatch(source, crimeType, severity, data)
         severity = severity,
         coords = { x = coords.x, y = coords.y, z = coords.z },
         zone = FreeGangs.Server.GetPlayerZone(source),
-        timestamp = os.time(),
+        timestamp = FreeGangs.Utils.GetTimestamp(),
     }
 
     -- Merge additional data
@@ -594,7 +594,7 @@ local function GetDynamicMarketMultiplier(zoneName, drugItem)
     -- Check drought bonus first
     local droughtMult = 1.0
     local drought = activeDroughts[drugItem]
-    if drought and os.time() < (drought.startTime + drought.duration) then
+    if drought and FreeGangs.Utils.GetTimestamp() < (drought.startTime + drought.duration) then
         droughtMult = drought.multiplier or marketConfig.Drought.PriceMultiplier
     end
 
@@ -607,7 +607,7 @@ local function GetDynamicMarketMultiplier(zoneName, drugItem)
     end
 
     -- Clean old timestamps
-    local now = os.time()
+    local now = FreeGangs.Utils.GetTimestamp()
     local window = marketConfig.TrackingWindow or 3600
     local drugData = zoneData[drugItem]
     local validTimestamps = {}
@@ -646,7 +646,7 @@ local function RecordDrugSale(zoneName, drugItem, quantity)
     drugMarketData[zoneName] = drugMarketData[zoneName] or {}
     drugMarketData[zoneName][drugItem] = drugMarketData[zoneName][drugItem] or { count = 0, timestamps = {} }
 
-    local now = os.time()
+    local now = FreeGangs.Utils.GetTimestamp()
     for i = 1, quantity do
         table.insert(drugMarketData[zoneName][drugItem].timestamps, now)
     end
@@ -662,7 +662,7 @@ local function CheckDroughtEvents()
     if not droughtConfig or not droughtConfig.Enabled then return end
 
     -- Clean expired droughts
-    local now = os.time()
+    local now = FreeGangs.Utils.GetTimestamp()
     for drug, drought in pairs(activeDroughts) do
         if now >= (drought.startTime + drought.duration) then
             activeDroughts[drug] = nil
@@ -703,7 +703,7 @@ end
 ---@return table droughts
 function FreeGangs.Server.Activities.GetActiveDroughts()
     local result = {}
-    local now = os.time()
+    local now = FreeGangs.Utils.GetTimestamp()
     for drug, drought in pairs(activeDroughts) do
         if now < (drought.startTime + drought.duration) then
             result[drug] = {
@@ -1061,7 +1061,7 @@ function FreeGangs.Server.Activities.CollectProtection(source, businessId)
                                     FreeGangs.Config.Activities.Protection.CollectionIntervalHours or 4
     local collectionCooldown = collectionCooldownHours * 3600
     local lastCollection = protectionCollections[businessId] or 0
-    local now = os.time()
+    local now = FreeGangs.Utils.GetTimestamp()
 
     if protection.last_collection then
         local lastDbCollection = FreeGangs.Utils.ParseTimestamp(protection.last_collection)
@@ -1241,7 +1241,7 @@ local GANG_CACHE_TTL = 30 -- Cache for 30 seconds
 ---@param source number
 ---@return table|nil {gang, membership}
 function FreeGangs.Server.GetPlayerGangData(source)
-    local now = os.time()
+    local now = FreeGangs.Utils.GetTimestamp()
     local cached = playerGangCache[source]
     if cached and now < cached.expiry then
         return cached.data

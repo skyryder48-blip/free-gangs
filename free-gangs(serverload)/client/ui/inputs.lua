@@ -718,7 +718,7 @@ function FreeGangs.Client.UI.ShowRivalryDetails(otherGang, heat)
             icon = 'thermometer-full',
             iconColor = stageInfo.color,
             progress = heat,
-            colorScheme = heat >= 75 and 'red' or (heat >= 50 and 'orange' or 'yellow'),
+            colorScheme = heat >= 65 and 'red' or (heat >= 50 and 'orange' or 'yellow'),
             metadata = {
                 { label = 'Current', value = tostring(heat) },
                 { label = 'Stage', value = stageInfo.label },

@@ -194,7 +194,7 @@ FreeGangs.Config.Heat = {
 
 FreeGangs.Config.War = {
     -- Minimum heat required to declare war
-    MinHeatForWar = 90,
+    MinHeatForWar = 85,
     
     -- Collateral limits
     MinCollateral = 5000,

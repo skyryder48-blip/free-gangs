@@ -279,12 +279,12 @@ function FreeGangs.Server.Reputation.ApplyDiminishingReturns(gangName, activity,
     if not recentActivity[gangName][activity] then
         recentActivity[gangName][activity] = {
             count = 0,
-            lastReset = os.time(),
+            lastReset = FreeGangs.Utils.GetTimestamp(),
         }
     end
     
     local tracking = recentActivity[gangName][activity]
-    local currentTime = os.time()
+    local currentTime = FreeGangs.Utils.GetTimestamp()
     
     -- Reset hourly
     if currentTime - tracking.lastReset > 3600 then

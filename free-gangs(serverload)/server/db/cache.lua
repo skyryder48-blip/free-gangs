@@ -165,7 +165,7 @@ local function FlushHeat()
                 {
                     heatData.heat_level,
                     heatData.stage,
-                    heatData.last_decay or os.time(),
+                    heatData.last_decay or FreeGangs.Utils.GetTimestamp(),
                     heatData.gang_a,
                     heatData.gang_b
                 }
@@ -244,7 +244,7 @@ end
 ---Main flush function - flushes all dirty data
 ---@param force boolean|nil Force immediate synchronous flush
 function FreeGangs.Server.Cache.Flush(force)
-    local currentTime = os.time()
+    local currentTime = FreeGangs.Utils.GetTimestamp()
     
     -- Prevent too frequent flushes unless forced
     if not force and (currentTime - lastFlush) < 5 then
@@ -379,7 +379,7 @@ function FreeGangs.Server.Cache.SetTerritoryCooldown(zoneName, cooldownUntil)
     if not territory then return end
     
     territory.cooldown_until = cooldownUntil
-    territory.last_flip = os.time()
+    territory.last_flip = FreeGangs.Utils.GetTimestamp()
     
     FreeGangs.Server.Cache.MarkDirty('territory', zoneName)
 end
@@ -425,7 +425,7 @@ function FreeGangs.Server.Cache.UpdateHeat(gangA, gangB, heatLevel, stage)
             gang_b = gangB,
             heat_level = heatLevel,
             stage = stage or FreeGangs.GetHeatStage(heatLevel),
-            last_incident = os.time(),
+            last_incident = FreeGangs.Utils.GetTimestamp(),
         }
         FreeGangs.Server.Heat[key] = heatData
         
@@ -434,7 +434,7 @@ function FreeGangs.Server.Cache.UpdateHeat(gangA, gangB, heatLevel, stage)
     else
         heatData.heat_level = heatLevel
         heatData.stage = stage or FreeGangs.GetHeatStage(heatLevel)
-        heatData.last_incident = os.time()
+        heatData.last_incident = FreeGangs.Utils.GetTimestamp()
         
         FreeGangs.Server.Cache.MarkDirty('heat', key)
     end

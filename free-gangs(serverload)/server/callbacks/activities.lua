@@ -103,7 +103,7 @@ lib.callback.register('freegangs:activities:completeMugging', function(source, t
     if tracking.targetNetId ~= targetNetId then return false, 'Target mismatch' end
 
     -- Validate minimum time (progress bar is 3 seconds)
-    local elapsed = os.time() - tracking.startTime
+    local elapsed = FreeGangs.Utils.GetTimestamp() - tracking.startTime
     if elapsed < 2 then return false, 'Too fast' end
 
     local npcCategory = tracking.npcCategory
@@ -157,7 +157,7 @@ lib.callback.register('freegangs:activities:completePickpocket', function(source
     successfulRolls = math.max(0, math.min(math.floor(successfulRolls), maxRolls))
 
     -- Validate timing: each roll takes ~2 seconds client-side, require >= 1s per claimed roll
-    local elapsed = os.time() - tracking.startTime
+    local elapsed = FreeGangs.Utils.GetTimestamp() - tracking.startTime
     if successfulRolls > 0 and elapsed < successfulRolls then
         successfulRolls = math.max(0, math.floor(elapsed)) -- Clamp to plausible rolls
     end
@@ -223,7 +223,7 @@ lib.callback.register('freegangs:activities:completeDrugSale', function(source, 
     if tracking.targetNetId ~= targetNetId then return false, 'Target mismatch' end
 
     -- Validate minimum time (progress bar is 2.5 seconds)
-    local elapsed = os.time() - tracking.startTime
+    local elapsed = FreeGangs.Utils.GetTimestamp() - tracking.startTime
     if elapsed < 2 then return false, 'Too fast' end
 
     -- Clear tracking
@@ -290,7 +290,7 @@ lib.callback.register(FreeGangs.Callbacks.GET_PROTECTION_BUSINESSES, function(so
     local businesses = FreeGangs.Server.Activities.GetGangProtectionBusinesses(gangData.gang.name)
     
     -- Add ready status to each business
-    local now = os.time()
+    local now = FreeGangs.Utils.GetTimestamp()
     local collectionCooldownHours = FreeGangs.Config.Activities.Protection and
                                     FreeGangs.Config.Activities.Protection.CollectionIntervalHours or 4
     local collectionCooldown = collectionCooldownHours * 3600
@@ -450,7 +450,7 @@ RegisterNetEvent('freegangs:server:startMugging', function(targetNetId, npcCateg
         if npcCategory and not validCategories[npcCategory] then
             npcCategory = nil
         end
-        activeMuggings[source] = { targetNetId = targetNetId, startTime = os.time(), npcCategory = npcCategory }
+        activeMuggings[source] = { targetNetId = targetNetId, startTime = FreeGangs.Utils.GetTimestamp(), npcCategory = npcCategory }
     end
     FreeGangs.Utils.Debug('Player', source, 'starting mugging on', targetNetId)
 end)
@@ -459,7 +459,7 @@ end)
 RegisterNetEvent('freegangs:server:startPickpocket', function(targetNetId)
     local source = source
     if type(targetNetId) == 'number' then
-        activePickpockets[source] = { targetNetId = targetNetId, startTime = os.time() }
+        activePickpockets[source] = { targetNetId = targetNetId, startTime = FreeGangs.Utils.GetTimestamp() }
     end
     FreeGangs.Utils.Debug('Player', source, 'starting pickpocket on', targetNetId)
 end)
@@ -468,7 +468,7 @@ end)
 RegisterNetEvent('freegangs:server:startDrugSale', function(targetNetId)
     local source = source
     if type(targetNetId) == 'number' then
-        activeDrugSales[source] = { targetNetId = targetNetId, startTime = os.time() }
+        activeDrugSales[source] = { targetNetId = targetNetId, startTime = FreeGangs.Utils.GetTimestamp() }
     end
     FreeGangs.Utils.Debug('Player', source, 'starting drug sale to', targetNetId)
 end)

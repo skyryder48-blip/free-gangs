@@ -336,7 +336,7 @@ function FreeGangs.Server.Prison.StartSmuggleMission(source, gangName)
         rep = config.repReward,
         detectionChance = riskConfig.detectionChance,
         status = 'active',
-        startTime = os.time(),
+        startTime = FreeGangs.Utils.GetTimestamp(),
     }
     
     -- Set cooldown
@@ -527,7 +527,7 @@ function FreeGangs.Server.Prison.DeliverContraband(source, targetCitizenId, item
     ContrabandDeliveries[targetCitizenId] = {
         items = items,
         deliveredBy = citizenid,
-        deliveredAt = os.time(),
+        deliveredAt = FreeGangs.Utils.GetTimestamp(),
     }
     
     -- Set cooldown
@@ -641,7 +641,7 @@ function FreeGangs.Server.Prison.HelpEscape(source, targetCitizenId)
     EscapeRequests[targetCitizenId] = {
         requestedBy = citizenid,
         gangName = gangName,
-        timestamp = os.time(),
+        timestamp = FreeGangs.Utils.GetTimestamp(),
         cost = cost,
     }
     

@@ -148,7 +148,7 @@ lib.callback.register('free-gangs:callback:getBlockPartyStatus', function(source
         zoneName = party.zoneName,
         startTime = party.startTime,
         endTime = party.endTime,
-        remaining = party.endTime - os.time(),
+        remaining = party.endTime - FreeGangs.Utils.GetTimestamp(),
     }
 end)
 

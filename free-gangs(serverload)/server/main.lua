@@ -29,7 +29,10 @@ local function Initialize()
     -- Wait for database to be ready
     MySQL.ready(function()
         FreeGangs.Utils.Log('Database connection established')
-        
+
+        -- Initialize FiveM-compatible server time (must happen before any GetTimestamp calls)
+        FreeGangs.Utils.InitServerTime()
+
         -- Run database migrations/setup
         FreeGangs.Server.DB.Initialize()
         
@@ -245,7 +248,7 @@ end
 
 ---Process bribe payment deadlines
 function FreeGangs.Server.ProcessBribePayments()
-    local currentTime = os.time()
+    local currentTime = FreeGangs.Utils.GetTimestamp()
     
     for gangName, bribes in pairs(FreeGangs.Server.Bribes) do
         for contactType, bribe in pairs(bribes) do
@@ -266,7 +269,7 @@ end
 
 ---Cleanup expired cooldowns
 function FreeGangs.Server.CleanupCooldowns()
-    local currentTime = os.time()
+    local currentTime = FreeGangs.Utils.GetTimestamp()
     
     for source, cooldowns in pairs(FreeGangs.Server.PlayerCooldowns) do
         for cooldownType, expiry in pairs(cooldowns) do
@@ -346,7 +349,7 @@ function FreeGangs.Server.SetCooldown(source, cooldownType, durationSeconds)
     if not FreeGangs.Server.PlayerCooldowns[source] then
         FreeGangs.Server.PlayerCooldowns[source] = {}
     end
-    FreeGangs.Server.PlayerCooldowns[source][cooldownType] = os.time() + durationSeconds
+    FreeGangs.Server.PlayerCooldowns[source][cooldownType] = FreeGangs.Utils.GetTimestamp() + durationSeconds
 end
 
 ---Check if a player is on cooldown
@@ -360,7 +363,7 @@ function FreeGangs.Server.IsOnCooldown(source, cooldownType)
         return false, nil
     end
     
-    local remaining = cooldowns[cooldownType] - os.time()
+    local remaining = cooldowns[cooldownType] - FreeGangs.Utils.GetTimestamp()
     if remaining > 0 then
         return true, remaining
     end
@@ -500,7 +503,7 @@ function FreeGangs.Server.SendDiscordWebhook(title, message, color)
             description = message,
             color = color or 16711680, -- Red
             footer = {
-                text = os.date('%Y-%m-%d %H:%M:%S')
+                text = FreeGangs.Utils.FormatTime(FreeGangs.Utils.GetTimestamp())
             }
         }
     }

@@ -342,7 +342,7 @@ lib.callback.register('free-gangs:callback:getWarCooldown', function(source, gan
     return {
         has_cooldown = hasCooldown,
         cooldown_until = cooldownUntil,
-        remaining_seconds = hasCooldown and (cooldownUntil - os.time()) or 0,
+        remaining_seconds = hasCooldown and (cooldownUntil - FreeGangs.Utils.GetTimestamp()) or 0,
     }
 end)
 
@@ -374,7 +374,7 @@ lib.callback.register('free-gangs:callback:adminSetWarCooldown', function(source
         return false, 'Admin permission required'
     end
     
-    local cooldownUntil = os.time() + (hours * 3600)
+    local cooldownUntil = FreeGangs.Utils.GetTimestamp() + (hours * 3600)
     FreeGangs.Server.DB.SetWarCooldown(gangA, gangB, cooldownUntil, 'admin_set')
     
     return true
@@ -387,7 +387,7 @@ lib.callback.register('free-gangs:callback:adminClearWarCooldown', function(sour
     end
     
     -- Set cooldown to past time
-    FreeGangs.Server.DB.SetWarCooldown(gangA, gangB, os.time() - 1, 'admin_cleared')
+    FreeGangs.Server.DB.SetWarCooldown(gangA, gangB, FreeGangs.Utils.GetTimestamp() - 1, 'admin_cleared')
     
     return true
 end)

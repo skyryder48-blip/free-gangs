@@ -64,7 +64,7 @@ local function GetOrCreateHeatData(gangA, gangB)
         heat_level = 0,
         stage = FreeGangs.HeatStages.NEUTRAL,
         last_incident = nil,
-        last_decay = os.time(),
+        last_decay = FreeGangs.Utils.GetTimestamp(),
     }
     
     FreeGangs.Server.Heat[key] = newHeat
@@ -113,7 +113,7 @@ function FreeGangs.Server.Heat.Add(gangA, gangB, amount, reason)
     -- Update heat data
     heatData.heat_level = newHeat
     heatData.stage = newStage
-    heatData.last_incident = os.time()
+    heatData.last_incident = FreeGangs.Utils.GetTimestamp()
     
     -- Mark dirty for database persistence
     MarkHeatDirty(gangA, gangB)
@@ -211,7 +211,7 @@ function FreeGangs.Server.Heat.Set(gangA, gangB, heat, reason)
     heatData.stage = newStage
     
     if heat > 0 then
-        heatData.last_incident = os.time()
+        heatData.last_incident = FreeGangs.Utils.GetTimestamp()
     end
     
     -- Mark dirty for database persistence
@@ -422,7 +422,7 @@ end
 ---Stage multipliers slow decay at higher stages (war/rivalry persist longer)
 ---and accelerate it at lower stages (trace beef clears faster).
 function FreeGangs.Server.Heat.ProcessDecay()
-    local currentTime = os.time()
+    local currentTime = FreeGangs.Utils.GetTimestamp()
     local gangDecayRate = FreeGangs.Config.Heat.GangDecayRate
     local gangDecayInterval = FreeGangs.Config.Heat.GangDecayMinutes * 60
 
@@ -515,7 +515,7 @@ end
 -- HEAT CHECKING UTILITIES
 -- ============================================================================
 
----Check if two gangs can declare war (heat >= 90)
+---Check if two gangs can declare war (heat >= MinHeatForWar)
 ---@param gangA string
 ---@param gangB string
 ---@return boolean canDeclare

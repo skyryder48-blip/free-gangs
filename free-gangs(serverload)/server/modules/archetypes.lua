@@ -336,7 +336,7 @@ function FreeGangs.Server.Archetypes.Street.StartBlockParty(source, gangName, pa
     
     -- Check if party already active
     if ActiveBlockParties[gangName] then
-        local remaining = ActiveBlockParties[gangName].endTime - os.time()
+        local remaining = ActiveBlockParties[gangName].endTime - FreeGangs.Utils.GetTimestamp()
         if remaining > 0 then
             return false, 'Block party already active. ' .. FreeGangs.Utils.FormatDuration(remaining * 1000) .. ' remaining'
         end
@@ -365,7 +365,7 @@ function FreeGangs.Server.Archetypes.Street.StartBlockParty(source, gangName, pa
     end
     
     -- Start block party
-    local startTime = os.time()
+    local startTime = FreeGangs.Utils.GetTimestamp()
     local endTime = startTime + config.Duration
     
     ActiveBlockParties[gangName] = {
@@ -418,7 +418,7 @@ function FreeGangs.Server.Archetypes.Street.EndBlockParty(gangName)
     -- Log
     FreeGangs.Server.DB.Log(gangName, nil, 'block_party_ended', FreeGangs.LogCategories.ACTIVITY, {
         zoneName = party.zoneName,
-        duration = os.time() - party.startTime,
+        duration = FreeGangs.Utils.GetTimestamp() - party.startTime,
     })
 end
 
@@ -429,7 +429,7 @@ function FreeGangs.Server.Archetypes.Street.IsBlockPartyActive(gangName)
     local party = ActiveBlockParties[gangName]
     if not party then return false, nil end
     
-    if os.time() > party.endTime then
+    if FreeGangs.Utils.GetTimestamp() > party.endTime then
         ActiveBlockParties[gangName] = nil
         return false, nil
     end
@@ -478,7 +478,7 @@ function FreeGangs.Server.Archetypes.Street.AcceptDriveByContract(source, gangNa
     
     -- Check if mission already active
     if ActiveDriveByMissions[gangName] and ActiveDriveByMissions[gangName].status == 'active' then
-        local remaining = ActiveDriveByMissions[gangName].expiresAt - os.time()
+        local remaining = ActiveDriveByMissions[gangName].expiresAt - FreeGangs.Utils.GetTimestamp()
         if remaining > 0 then
             return false, 'Drive-by mission already active. ' .. FreeGangs.Utils.FormatDuration(remaining * 1000) .. ' remaining'
         end
@@ -544,8 +544,8 @@ function FreeGangs.Server.Archetypes.Street.AcceptDriveByContract(source, gangNa
         influenceGain = config.InfluenceGain or 5,
         heatGain = config.HeatGenerated or 25,
         status = 'active',
-        startedAt = os.time(),
-        expiresAt = os.time() + timeLimit,
+        startedAt = FreeGangs.Utils.GetTimestamp(),
+        expiresAt = FreeGangs.Utils.GetTimestamp() + timeLimit,
         timeLimit = timeLimit,
         targetsKilled = 0,
         requiredKills = config.RequiredKills or 1,
@@ -617,7 +617,7 @@ function FreeGangs.Server.Archetypes.Street.RecordDriveByKill(source, gangName)
     end
     
     -- Check if mission expired
-    if os.time() >= mission.expiresAt then
+    if FreeGangs.Utils.GetTimestamp() >= mission.expiresAt then
         FreeGangs.Server.Archetypes.Street.FailDriveByMission(gangName, 'Time expired')
         return false, 'Mission time expired'
     end
@@ -644,7 +644,7 @@ function FreeGangs.Server.Archetypes.Street.CompleteDriveByMission(source, gangN
     if not mission then return false, 'No active mission' end
     
     mission.status = 'completed'
-    mission.completedAt = os.time()
+    mission.completedAt = FreeGangs.Utils.GetTimestamp()
     
     local config = FreeGangs.Config.StreetGang.DriveByContracts
     
@@ -705,7 +705,7 @@ function FreeGangs.Server.Archetypes.Street.FailDriveByMission(gangName, reason)
     if not mission or mission.status ~= 'active' then return end
     
     mission.status = 'failed'
-    mission.failedAt = os.time()
+    mission.failedAt = FreeGangs.Utils.GetTimestamp()
     mission.failReason = reason
     
     local config = FreeGangs.Config.StreetGang.DriveByContracts.FailurePenalty or {}
@@ -760,12 +760,12 @@ end
 function FreeGangs.Server.Archetypes.Street.CheckDriveByExpiry(gangName)
     if gangName then
         local mission = ActiveDriveByMissions[gangName]
-        if mission and mission.status == 'active' and os.time() >= mission.expiresAt then
+        if mission and mission.status == 'active' and FreeGangs.Utils.GetTimestamp() >= mission.expiresAt then
             FreeGangs.Server.Archetypes.Street.FailDriveByMission(gangName, 'Time expired')
         end
     else
         for gName, mission in pairs(ActiveDriveByMissions) do
-            if mission.status == 'active' and os.time() >= mission.expiresAt then
+            if mission.status == 'active' and FreeGangs.Utils.GetTimestamp() >= mission.expiresAt then
                 FreeGangs.Server.Archetypes.Street.FailDriveByMission(gName, 'Time expired')
             end
         end
@@ -785,7 +785,7 @@ function FreeGangs.Server.Archetypes.Street.GetDriveByMissionStatus(gangName)
         targetGang = mission.targetGang,
         targetsKilled = mission.targetsKilled,
         requiredKills = mission.requiredKills,
-        timeRemaining = math.max(0, mission.expiresAt - os.time()),
+        timeRemaining = math.max(0, mission.expiresAt - FreeGangs.Utils.GetTimestamp()),
         payout = mission.payout,
         repGain = mission.repGain,
         influenceGain = mission.influenceGain,
@@ -903,8 +903,8 @@ function FreeGangs.Server.Archetypes.MC.StartProspectRun(source, gangName, param
         destination = destination,
         destinationTerritory = destination.territory,
         status = 'active',
-        startedAt = os.time(),
-        expiresAt = os.time() + timeLimitSeconds,
+        startedAt = FreeGangs.Utils.GetTimestamp(),
+        expiresAt = FreeGangs.Utils.GetTimestamp() + timeLimitSeconds,
         timeLimit = timeLimitSeconds,
         destinationAmbushChance = destinationAmbushChance,
         routeAmbushChance = routeAmbushChance,
@@ -1092,7 +1092,7 @@ function FreeGangs.Server.Archetypes.MC.CompleteProspectRun(source, runId, wasAm
     end
     
     -- Check if time expired
-    if os.time() >= runData.expiresAt then
+    if FreeGangs.Utils.GetTimestamp() >= runData.expiresAt then
         return FreeGangs.Server.Archetypes.MC.FailProspectRun(citizenid, runId, 'Time expired')
     end
     
@@ -1119,7 +1119,7 @@ function FreeGangs.Server.Archetypes.MC.CompleteProspectRun(source, runId, wasAm
     
     -- Mark as complete
     runData.status = 'completed'
-    runData.completedAt = os.time()
+    runData.completedAt = FreeGangs.Utils.GetTimestamp()
     
     local config = FreeGangs.Config.MC.ProspectRuns
     local gangName = runData.gangName
@@ -1190,7 +1190,7 @@ function FreeGangs.Server.Archetypes.MC.FailProspectRun(citizenid, runId, reason
     end
     
     runData.status = 'failed'
-    runData.failedAt = os.time()
+    runData.failedAt = FreeGangs.Utils.GetTimestamp()
     runData.failReason = reason
     
     local config = FreeGangs.Config.MC.ProspectRuns
@@ -1224,7 +1224,7 @@ end
 function FreeGangs.Server.Archetypes.MC.CheckProspectRunExpiry(citizenid, runId)
     local runData = ActiveProspectRuns[citizenid]
     if runData and runData.id == runId and runData.status == 'active' then
-        if os.time() >= runData.expiresAt then
+        if FreeGangs.Utils.GetTimestamp() >= runData.expiresAt then
             FreeGangs.Server.Archetypes.MC.FailProspectRun(citizenid, runId, 'Time expired')
         end
     end
@@ -1372,8 +1372,8 @@ function FreeGangs.Server.Archetypes.MC.StartClubRun(source, gangName, params)
         destination = destination,
         destinationTerritory = destination.territory,
         status = 'active',
-        startedAt = os.time(),
-        expiresAt = os.time() + timeLimitSeconds,
+        startedAt = FreeGangs.Utils.GetTimestamp(),
+        expiresAt = FreeGangs.Utils.GetTimestamp() + timeLimitSeconds,
         timeLimit = timeLimitSeconds,
         destinationAmbushChance = destinationAmbushChance,
         routeAmbushChance = routeAmbushChance,
@@ -1574,7 +1574,7 @@ function FreeGangs.Server.Archetypes.MC.CompleteClubRun(source, gangName, wasAmb
     end
     
     -- Check time
-    if os.time() >= run.expiresAt then
+    if FreeGangs.Utils.GetTimestamp() >= run.expiresAt then
         return FreeGangs.Server.Archetypes.MC.FailClubRun(gangName, 'Time expired')
     end
     
@@ -1609,7 +1609,7 @@ function FreeGangs.Server.Archetypes.MC.CompleteClubRun(source, gangName, wasAmb
     
     -- Mark complete
     run.status = 'completed'
-    run.completedAt = os.time()
+    run.completedAt = FreeGangs.Utils.GetTimestamp()
     
     -- === SUCCESS REWARDS (scaled up from prospect) ===
     
@@ -1674,7 +1674,7 @@ function FreeGangs.Server.Archetypes.MC.FailClubRun(gangName, reason)
     if not run then return false, 'No active run' end
     
     run.status = 'failed'
-    run.failedAt = os.time()
+    run.failedAt = FreeGangs.Utils.GetTimestamp()
     run.failReason = reason
     
     local config = FreeGangs.Config.MC.ClubRuns
@@ -1708,7 +1708,7 @@ end
 function FreeGangs.Server.Archetypes.MC.CheckClubRunTimeout(gangName, runId)
     local run = ActiveClubRuns[gangName]
     if run and run.id == runId and run.status == 'active' then
-        if os.time() >= run.expiresAt then
+        if FreeGangs.Utils.GetTimestamp() >= run.expiresAt then
             FreeGangs.Server.Archetypes.MC.FailClubRun(gangName, 'Time expired')
         end
     end
@@ -1726,7 +1726,7 @@ function FreeGangs.Server.Archetypes.MC.GetActiveClubRun(gangName)
         destination = run.destination,
         requiredItems = run.requiredItems,
         memberCount = #run.members,
-        timeRemaining = math.max(0, run.expiresAt - os.time()),
+        timeRemaining = math.max(0, run.expiresAt - FreeGangs.Utils.GetTimestamp()),
     }
 end
 
@@ -1790,7 +1790,7 @@ function FreeGangs.Server.Archetypes.MC.StartTerritoryRide(source, gangName, par
         startedBy = citizenid,
         leaderSource = source,
         status = 'active',
-        startTime = os.time(),
+        startTime = FreeGangs.Utils.GetTimestamp(),
         -- Track participating members (validated each tick)
         activeMembers = { source },
         activeMemberCitizenIds = { citizenid },
@@ -1954,7 +1954,7 @@ function FreeGangs.Server.Archetypes.MC.RecordTerritoryRideZone(gangName, zoneNa
         return false, nil
     end
     
-    local now = os.time()
+    local now = FreeGangs.Utils.GetTimestamp()
     
     -- Check zone visit cooldown
     local lastVisit = ride.visitedZones[zoneName]
@@ -2051,7 +2051,7 @@ function FreeGangs.Server.Archetypes.MC.EndTerritoryRide(source, gangName)
     end
     
     ride.status = 'completed'
-    ride.endTime = os.time()
+    ride.endTime = FreeGangs.Utils.GetTimestamp()
     
     local config = FreeGangs.Config.MC.TerritoryRide
     
@@ -2126,7 +2126,7 @@ function FreeGangs.Server.Archetypes.MC.GetActiveTerritoryRide(gangName)
         id = ride.id,
         leaderSource = ride.leaderSource,
         memberCount = #ride.activeMembers,
-        duration = os.time() - ride.startTime,
+        duration = FreeGangs.Utils.GetTimestamp() - ride.startTime,
         ownedZonesVisited = ownedZones,
         oppositionZonesVisited = oppositionZones,
         totalInfluenceGained = ride.totalInfluenceGained,
@@ -2251,7 +2251,7 @@ function FreeGangs.Server.Archetypes.Cartel.SendHalconAlert(gangName, zoneName, 
         zoneName = zoneName,
         alertType = alertType,
         intelQuality = intelQuality,
-        timestamp = os.time(),
+        timestamp = FreeGangs.Utils.GetTimestamp(),
     }
     
     if intelQuality == 'detailed' or intelQuality == 'full' then
@@ -2344,8 +2344,8 @@ function FreeGangs.Server.Archetypes.Cartel.StartConvoyProtection(source, gangNa
         destination = destination,
         destinationTerritory = destination.territory,
         status = 'active',
-        startedAt = os.time(),
-        expiresAt = os.time() + timeLimitSeconds,
+        startedAt = FreeGangs.Utils.GetTimestamp(),
+        expiresAt = FreeGangs.Utils.GetTimestamp() + timeLimitSeconds,
         timeLimit = timeLimitSeconds,
         destinationAmbushChance = destinationAmbushChance,
         -- NO route ambush for Cartel convoys
@@ -2581,7 +2581,7 @@ function FreeGangs.Server.Archetypes.Cartel.CompleteConvoy(source, gangName, was
     end
     
     -- Check time
-    if os.time() >= convoy.expiresAt then
+    if FreeGangs.Utils.GetTimestamp() >= convoy.expiresAt then
         return FreeGangs.Server.Archetypes.Cartel.FailConvoy(gangName, 'Time expired')
     end
     
@@ -2609,7 +2609,7 @@ function FreeGangs.Server.Archetypes.Cartel.CompleteConvoy(source, gangName, was
     end
     
     convoy.status = 'completed'
-    convoy.completedAt = os.time()
+    convoy.completedAt = FreeGangs.Utils.GetTimestamp()
     
     local config = FreeGangs.Config.Cartel.ConvoyProtection
     local participantCount = #convoy.participants
@@ -2673,7 +2673,7 @@ function FreeGangs.Server.Archetypes.Cartel.FailConvoy(gangName, reason)
     if not convoy then return false, 'No active convoy' end
     
     convoy.status = 'failed'
-    convoy.failedAt = os.time()
+    convoy.failedAt = FreeGangs.Utils.GetTimestamp()
     convoy.failReason = reason
     
     local config = FreeGangs.Config.Cartel.ConvoyProtection
@@ -2703,7 +2703,7 @@ end
 function FreeGangs.Server.Archetypes.Cartel.CheckConvoyExpiry(gangName, convoyId)
     local convoy = ActiveConvoys[gangName]
     if convoy and convoy.id == convoyId and convoy.status == 'active' then
-        if os.time() >= convoy.expiresAt then
+        if FreeGangs.Utils.GetTimestamp() >= convoy.expiresAt then
             FreeGangs.Server.Archetypes.Cartel.FailConvoy(gangName, 'Time expired')
         end
     end
@@ -2721,7 +2721,7 @@ function FreeGangs.Server.Archetypes.Cartel.GetActiveConvoy(gangName)
         destination = convoy.destination,
         requiredItems = convoy.requiredItems,
         participantCount = #convoy.participants,
-        timeRemaining = math.max(0, convoy.expiresAt - os.time()),
+        timeRemaining = math.max(0, convoy.expiresAt - FreeGangs.Utils.GetTimestamp()),
     }
 end
 
