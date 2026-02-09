@@ -673,6 +673,87 @@ local function GetCitizenId(source)
 end
 exports('GetCitizenId', GetCitizenId)
 
+-- ============================================================================
+-- POLICE DISPATCH INTEGRATION EXPORTS
+-- ============================================================================
+
+---Get dispatch data for a crime event (for external dispatch scripts)
+---External dispatch scripts should listen to the 'freegangs:dispatch:crimeReport' server event
+---@return string description How to integrate
+local function GetDispatchInfo()
+    return {
+        event = 'freegangs:dispatch:crimeReport',
+        description = 'Listen to this server event for crime reports',
+        dataFormat = {
+            source = 'Player server ID',
+            crimeType = 'mugging | pickpocket | drug_sale',
+            severity = '1-5 severity rating',
+            coords = '{ x, y, z }',
+            zone = 'Zone name or nil',
+            timestamp = 'Unix timestamp',
+        },
+    }
+end
+exports('GetDispatchInfo', GetDispatchInfo)
+
+-- ============================================================================
+-- EXTERNAL DRUG BUYER PED INTEGRATION EXPORTS
+-- ============================================================================
+
+---Process an external drug sale (from a ped spawner script)
+---Awards gang XP, reputation, zone influence, and tracks stats
+---The calling script handles the actual item removal and money transfer
+---@param source number Player server ID
+---@param drugItem string Drug item name
+---@param quantity number Amount sold
+---@param cashEarned number Cash the player received
+---@return boolean success
+---@return table|nil rewards { rep, heat }
+local function ProcessExternalDrugSale(source, drugItem, quantity, cashEarned)
+    if not FreeGangs.Server.Activities.ProcessExternalDrugSale then
+        return false, nil
+    end
+    return FreeGangs.Server.Activities.ProcessExternalDrugSale(source, drugItem, quantity, cashEarned)
+end
+exports('ProcessExternalDrugSale', ProcessExternalDrugSale)
+
+---Get lifetime crime stats for a player
+---@param source number Player server ID
+---@return table|nil stats
+local function GetPlayerCrimeStats(source)
+    local citizenid = FreeGangs.Bridge.GetCitizenId(source)
+    if not citizenid then return nil end
+
+    local stats = MySQL.query.await([[
+        SELECT crime_type, total_count, total_cash_earned, last_performed
+        FROM freegangs_crime_stats WHERE citizenid = ?
+    ]], { citizenid })
+
+    if not stats then return {} end
+
+    local result = {}
+    for _, row in ipairs(stats) do
+        result[row.crime_type] = {
+            count = row.total_count,
+            cashEarned = row.total_cash_earned,
+            lastPerformed = row.last_performed,
+        }
+    end
+
+    return result
+end
+exports('GetPlayerCrimeStats', GetPlayerCrimeStats)
+
+---Get active drug drought events
+---@return table droughts { [drugItem] = { remaining, multiplier } }
+local function GetActiveDroughts()
+    if not FreeGangs.Server.Activities.GetActiveDroughts then
+        return {}
+    end
+    return FreeGangs.Server.Activities.GetActiveDroughts()
+end
+exports('GetActiveDroughts', GetActiveDroughts)
+
 -- Log export registration
 FreeGangs.Utils.Log('Server exports registered')
 

@@ -138,4 +138,16 @@ server_exports {
     'GetArchetype',
     'HasArchetypeAccess',
     'ApplyArchetypeBonus',
+
+    -- Dispatch
+    'GetDispatchInfo',
+
+    -- External Drug Sales
+    'ProcessExternalDrugSale',
+
+    -- Crime Stats
+    'GetPlayerCrimeStats',
+
+    -- Drug Market
+    'GetActiveDroughts',
 }

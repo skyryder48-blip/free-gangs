@@ -323,6 +323,24 @@ CREATE TABLE IF NOT EXISTS `freegangs_player_heat` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ============================================================================
+-- LIFETIME CRIME STATS (Per-player crime activity tracking)
+-- ============================================================================
+
+CREATE TABLE IF NOT EXISTS `freegangs_crime_stats` (
+    `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    `citizenid` VARCHAR(50) NOT NULL COMMENT 'Player identifier',
+    `crime_type` VARCHAR(50) NOT NULL COMMENT 'Crime type (mugging, pickpocket, drug_sale, etc.)',
+    `total_count` INT UNSIGNED DEFAULT 0 COMMENT 'Lifetime count of this crime type',
+    `total_cash_earned` BIGINT UNSIGNED DEFAULT 0 COMMENT 'Lifetime cash earned from this crime type',
+    `last_performed` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+
+    UNIQUE KEY `uk_player_crime` (`citizenid`, `crime_type`),
+    INDEX `idx_citizenid` (`citizenid`),
+    INDEX `idx_crime_type` (`crime_type`),
+    INDEX `idx_count` (`crime_type`, `total_count` DESC)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ============================================================================
 -- INDEXES FOR PERFORMANCE
 -- ============================================================================
 

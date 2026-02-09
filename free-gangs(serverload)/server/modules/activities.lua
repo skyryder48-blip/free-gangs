@@ -27,6 +27,13 @@ local npcCooldowns = {
 -- Track player activity stats per hour (for diminishing returns)
 local playerHourlyStats = {}
 
+-- Dynamic drug market: track sales volume per zone per drug
+-- Structure: { [zoneName] = { [drugItem] = { count = N, timestamps = { ... } } } }
+local drugMarketData = {}
+
+-- Active drought events: { [drugItem] = { startTime = N, duration = N, multiplier = N } }
+local activeDroughts = {}
+
 -- Track protection collection times
 local protectionCollections = {}
 
@@ -250,6 +257,59 @@ local function AwardLoot(source, items, cash)
     return success
 end
 
+---Record a crime stat for lifetime tracking
+---@param citizenid string
+---@param crimeType string (mugging, pickpocket, drug_sale, etc.)
+---@param data table Optional data {cashEarned, itemsFound, quantity, etc.}
+local function RecordCrimeStat(citizenid, crimeType, data)
+    data = data or {}
+    MySQL.query([[
+        INSERT INTO freegangs_crime_stats (citizenid, crime_type, total_count, total_cash_earned, last_performed)
+        VALUES (?, ?, 1, ?, CURRENT_TIMESTAMP)
+        ON DUPLICATE KEY UPDATE
+            total_count = total_count + 1,
+            total_cash_earned = total_cash_earned + ?,
+            last_performed = CURRENT_TIMESTAMP
+    ]], { citizenid, crimeType, data.cash or 0, data.cash or 0 })
+end
+
+---Trigger police dispatch event for crime activities
+---@param source number Player source
+---@param crimeType string Type of crime (mugging, pickpocket, drug_sale)
+---@param severity number 1-5 severity rating
+---@param data table Additional data
+local function TriggerDispatch(source, crimeType, severity, data)
+    local playerPed = GetPlayerPed(source)
+    local coords = GetEntityCoords(playerPed)
+
+    local dispatchData = {
+        source = source,
+        crimeType = crimeType,
+        severity = severity,
+        coords = { x = coords.x, y = coords.y, z = coords.z },
+        zone = FreeGangs.Server.GetPlayerZone(source),
+        timestamp = os.time(),
+    }
+
+    -- Merge additional data
+    if data then
+        for k, v in pairs(data) do
+            dispatchData[k] = v
+        end
+    end
+
+    -- Fire server event for external dispatch scripts to listen
+    TriggerEvent('freegangs:dispatch:crimeReport', dispatchData)
+
+    -- Also trigger via exports if dispatch resource exists
+    if GetResourceState('ps-dispatch') == 'started' or
+       GetResourceState('cd_dispatch') == 'started' or
+       GetResourceState('qs-dispatch') == 'started' or
+       GetResourceState('core_dispatch') == 'started' then
+        TriggerEvent('freegangs:dispatch:alert', dispatchData)
+    end
+end
+
 -- ============================================================================
 -- MUGGING SYSTEM
 -- ============================================================================
@@ -260,7 +320,7 @@ end
 ---@return boolean success
 ---@return string message
 ---@return table|nil rewards
-function FreeGangs.Server.Activities.Mug(source, targetNetId)
+function FreeGangs.Server.Activities.Mug(source, targetNetId, npcCategory)
     -- Validate player
     local citizenid = FreeGangs.Bridge.GetCitizenId(source)
     if not citizenid then
@@ -281,10 +341,58 @@ function FreeGangs.Server.Activities.Mug(source, targetNetId)
         return false, FreeGangs.L('activities', 'invalid_target'), nil
     end
 
-    -- Generate loot
+    -- NPC Resistance check
     local config = FreeGangs.Config.Activities.Mugging
-    local baseCash = math.random(config.MinCash, config.MaxCash)
-    local items, additionalCash = GenerateLoot(config.LootTable, 1)
+    local resistConfig = FreeGangs.Config.Activities.Mugging.Resistance
+    local resisted = false
+    if resistConfig and resistConfig.Enabled then
+        local resistChance = resistConfig.BaseResistChance or 5
+        local categoryConfig = nil
+
+        if npcCategory and resistConfig.Categories and resistConfig.Categories[npcCategory] then
+            categoryConfig = resistConfig.Categories[npcCategory]
+            resistChance = categoryConfig.resistChance or resistChance
+        end
+
+        if math.random(100) <= resistChance then
+            resisted = true
+        end
+    end
+
+    if resisted then
+        -- NPC fought back - no loot, still set cooldowns
+        FreeGangs.Server.SetCooldown(source, 'mugging', config.PlayerCooldown)
+        SetNPCCooldown(targetNetId, 'mugging', config.NPCCooldown or 86400)
+
+        -- Still generate heat even on failed mugging
+        if gangData then
+            local activityPoints = FreeGangs.ActivityPoints[FreeGangs.Activities.MUGGING]
+            FreeGangs.Server.AddPlayerHeat(citizenid, activityPoints.heat)
+
+            FreeGangs.Server.DB.Log(gangData.gang.name, citizenid, 'mugging_resisted', FreeGangs.LogCategories.ACTIVITY, {
+                targetNetId = targetNetId,
+                npcCategory = npcCategory,
+                zone = FreeGangs.Server.GetPlayerZone(source),
+            })
+        end
+
+        return false, FreeGangs.L('activities', 'mugging_resisted'), { resisted = true, npcCategory = npcCategory }
+    end
+
+    -- Use category-specific loot table and cash multiplier if available
+    local lootTable = config.LootTable
+    local cashMultiplier = 1.0
+
+    if npcCategory and resistConfig and resistConfig.Enabled and resistConfig.Categories[npcCategory] then
+        local categoryConfig = resistConfig.Categories[npcCategory]
+        if categoryConfig.lootTable then
+            lootTable = categoryConfig.lootTable
+        end
+        cashMultiplier = categoryConfig.cashMultiplier or 1.0
+    end
+
+    local baseCash = math.floor(math.random(config.MinCash, config.MaxCash) * cashMultiplier)
+    local items, additionalCash = GenerateLoot(lootTable, 1)
     local totalCash = baseCash + additionalCash
 
     -- Award loot
@@ -338,6 +446,12 @@ function FreeGangs.Server.Activities.Mug(source, targetNetId)
     -- Update hourly stats
     local stats = GetPlayerHourlyStats(citizenid)
     stats.muggings = stats.muggings + 1
+
+    -- Record lifetime crime stat
+    RecordCrimeStat(citizenid, 'mugging', { cash = totalCash })
+
+    -- Trigger police dispatch
+    TriggerDispatch(source, 'mugging', 3, { weapon = true })
 
     local lootDisplay = FormatLootDisplay(items, totalCash)
     return true, FreeGangs.L('activities', 'mugging_success', lootDisplay), {
@@ -398,9 +512,11 @@ function FreeGangs.Server.Activities.Pickpocket(source, targetNetId, successfulR
                 zone = currentZone,
             })
 
+            TriggerDispatch(source, 'pickpocket', 1, {})
             return false, FreeGangs.L('activities', 'pickpocket_fail'), { heat = failHeat, detected = true }
         end
 
+        TriggerDispatch(source, 'pickpocket', 1, {})
         return false, FreeGangs.L('activities', 'pickpocket_fail'), { detected = true }
     end
 
@@ -451,6 +567,9 @@ function FreeGangs.Server.Activities.Pickpocket(source, targetNetId, successfulR
     local stats = GetPlayerHourlyStats(citizenid)
     stats.pickpockets = stats.pickpockets + 1
 
+    -- Record lifetime crime stat
+    RecordCrimeStat(citizenid, 'pickpocket', { cash = cash })
+
     return true, FreeGangs.L('activities', 'pickpocket_success'), {
         cash = cash,
         items = items,
@@ -458,6 +577,142 @@ function FreeGangs.Server.Activities.Pickpocket(source, targetNetId, successfulR
         heat = heatAmount,
         rolls = successfulRolls,
     }
+end
+
+-- ============================================================================
+-- DYNAMIC DRUG MARKET HELPERS
+-- ============================================================================
+
+---Get dynamic market supply multiplier for a drug in a zone
+---@param zoneName string|nil
+---@param drugItem string
+---@return number multiplier (0.5 to 1.25)
+local function GetDynamicMarketMultiplier(zoneName, drugItem)
+    local marketConfig = FreeGangs.Config.Activities.DrugSales.DynamicMarket
+    if not marketConfig or not marketConfig.Enabled then return 1.0 end
+
+    -- Check drought bonus first
+    local droughtMult = 1.0
+    local drought = activeDroughts[drugItem]
+    if drought and os.time() < (drought.startTime + drought.duration) then
+        droughtMult = drought.multiplier or marketConfig.Drought.PriceMultiplier
+    end
+
+    if not zoneName then return droughtMult end
+
+    local zoneData = drugMarketData[zoneName]
+    if not zoneData or not zoneData[drugItem] then
+        -- No sales in this zone = undersupply bonus
+        return (marketConfig.UndersupplyBonus or 1.25) * droughtMult
+    end
+
+    -- Clean old timestamps
+    local now = os.time()
+    local window = marketConfig.TrackingWindow or 3600
+    local drugData = zoneData[drugItem]
+    local validTimestamps = {}
+    for _, ts in ipairs(drugData.timestamps or {}) do
+        if now - ts <= window then
+            validTimestamps[#validTimestamps + 1] = ts
+        end
+    end
+    drugData.timestamps = validTimestamps
+    drugData.count = #validTimestamps
+
+    local salesCount = drugData.count
+    local threshold = marketConfig.SaturationThreshold or 15
+
+    if salesCount <= threshold then
+        return 1.0 * droughtMult
+    end
+
+    -- Oversupply penalty
+    local excessSales = salesCount - threshold
+    local penalty = excessSales * (marketConfig.SupplyPenaltyRate or 0.03)
+    local supplyMult = math.max(marketConfig.MinSupplyMultiplier or 0.50, 1.0 - penalty)
+
+    return supplyMult * droughtMult
+end
+
+---Record a drug sale in the market tracker
+---@param zoneName string|nil
+---@param drugItem string
+---@param quantity number
+local function RecordDrugSale(zoneName, drugItem, quantity)
+    local marketConfig = FreeGangs.Config.Activities.DrugSales.DynamicMarket
+    if not marketConfig or not marketConfig.Enabled then return end
+    if not zoneName then return end
+
+    drugMarketData[zoneName] = drugMarketData[zoneName] or {}
+    drugMarketData[zoneName][drugItem] = drugMarketData[zoneName][drugItem] or { count = 0, timestamps = {} }
+
+    local now = os.time()
+    for i = 1, quantity do
+        table.insert(drugMarketData[zoneName][drugItem].timestamps, now)
+    end
+    drugMarketData[zoneName][drugItem].count = #drugMarketData[zoneName][drugItem].timestamps
+end
+
+---Check and potentially trigger drought events (called periodically)
+local function CheckDroughtEvents()
+    local marketConfig = FreeGangs.Config.Activities.DrugSales.DynamicMarket
+    if not marketConfig or not marketConfig.Enabled then return end
+
+    local droughtConfig = marketConfig.Drought
+    if not droughtConfig or not droughtConfig.Enabled then return end
+
+    -- Clean expired droughts
+    local now = os.time()
+    for drug, drought in pairs(activeDroughts) do
+        if now >= (drought.startTime + drought.duration) then
+            activeDroughts[drug] = nil
+            FreeGangs.Utils.Log('[DrugMarket] Drought ended for ' .. drug)
+        end
+    end
+
+    -- Count active droughts
+    local activeCount = 0
+    for _ in pairs(activeDroughts) do activeCount = activeCount + 1 end
+
+    if activeCount >= (droughtConfig.MaxActive or 1) then return end
+
+    -- Roll for new drought
+    if math.random(100) <= (droughtConfig.ChancePerHour or 8) then
+        local sellableDrugs = FreeGangs.Config.Activities.DrugSales.SellableDrugs or {}
+        if #sellableDrugs == 0 then return end
+
+        local drug = sellableDrugs[math.random(#sellableDrugs)]
+        if activeDroughts[drug] then return end -- Already in drought
+
+        local duration = math.random(droughtConfig.MinDuration or 1800, droughtConfig.MaxDuration or 5400)
+        activeDroughts[drug] = {
+            startTime = now,
+            duration = duration,
+            multiplier = droughtConfig.PriceMultiplier or 2.0,
+        }
+
+        local drugLabel = FreeGangs.Bridge.GetItemLabel(drug) or drug
+        FreeGangs.Utils.Log('[DrugMarket] Drought started for ' .. drugLabel .. ' (' .. math.floor(duration/60) .. ' min)')
+
+        -- Notify all online players (optional flavor text)
+        TriggerClientEvent('freegangs:client:drugDroughtNotice', -1, drug, drugLabel)
+    end
+end
+
+---Get active drought info (for client display)
+---@return table droughts
+function FreeGangs.Server.Activities.GetActiveDroughts()
+    local result = {}
+    local now = os.time()
+    for drug, drought in pairs(activeDroughts) do
+        if now < (drought.startTime + drought.duration) then
+            result[drug] = {
+                remaining = (drought.startTime + drought.duration) - now,
+                multiplier = drought.multiplier,
+            }
+        end
+    end
+    return result
 end
 
 -- ============================================================================
@@ -621,7 +876,12 @@ function FreeGangs.Server.Activities.SellDrug(source, targetNetId, drugItem, qua
     local basePrice = math.random(drugConfig.minPrice or drugConfig.basePrice * 0.8, 
                                    drugConfig.maxPrice or drugConfig.basePrice * 1.2)
     local finalPrice, modifiers = CalculateDrugPrice(basePrice * quantity, gangName, currentZone)
-    
+
+    -- Apply dynamic market supply/demand multiplier
+    local marketMult = GetDynamicMarketMultiplier(currentZone, drugItem)
+    finalPrice = math.floor(finalPrice * marketMult)
+    modifiers.market = marketMult
+
     -- Apply diminishing returns
     local stats = GetPlayerHourlyStats(citizenid)
     local diminishingMult = GetDiminishingReturnsMultiplier(stats.drugSales)
@@ -641,7 +901,10 @@ function FreeGangs.Server.Activities.SellDrug(source, targetNetId, drugItem, qua
     
     -- Update stats
     stats.drugSales = stats.drugSales + quantity
-    
+
+    -- Record sale in dynamic market tracker
+    RecordDrugSale(currentZone, drugItem, quantity)
+
     local repAmount = 0
     local heatAmount = 0
 
@@ -668,6 +931,12 @@ function FreeGangs.Server.Activities.SellDrug(source, targetNetId, drugItem, qua
             zone = currentZone,
         })
     end
+
+    -- Record lifetime crime stat
+    RecordCrimeStat(citizenid, 'drug_sale', { cash = finalPrice })
+
+    -- Trigger police dispatch
+    TriggerDispatch(source, 'drug_sale', 2, { drug = drugItem, quantity = quantity })
 
     local drugLabel = FreeGangs.Bridge.GetItemLabel(drugItem) or drugItem
     return true, FreeGangs.L('activities', 'drug_sale_success', quantity, drugLabel, FreeGangs.Bridge.FormatMoney(finalPrice)), {
@@ -1056,6 +1325,72 @@ if not FreeGangs.Server.DB.GetMember then
 end
 
 -- ============================================================================
+-- EXTERNAL DRUG BUYER PED INTEGRATION
+-- ============================================================================
+
+---Process a drug sale from an external buyer ped (spawned by another script)
+---Awards XP/rep/influence but the calling script handles the transaction
+---@param source number Player source
+---@param drugItem string Drug item name
+---@param quantity number Amount sold
+---@param cashEarned number Cash the player received (for stat tracking)
+---@return boolean success
+---@return table|nil rewards
+function FreeGangs.Server.Activities.ProcessExternalDrugSale(source, drugItem, quantity, cashEarned)
+    local citizenid = FreeGangs.Bridge.GetCitizenId(source)
+    if not citizenid then return false, nil end
+
+    local gangData = FreeGangs.Server.GetPlayerGangData(source)
+    local currentZone = FreeGangs.Server.GetPlayerZone(source)
+
+    quantity = math.max(1, math.floor(tonumber(quantity) or 1))
+    cashEarned = tonumber(cashEarned) or 0
+
+    local repAmount = 0
+    local heatAmount = 0
+
+    if gangData then
+        local activityPoints = FreeGangs.ActivityPoints[FreeGangs.Activities.DRUG_SALE]
+        local stats = GetPlayerHourlyStats(citizenid)
+        local diminishingMult = GetDiminishingReturnsMultiplier(stats.drugSales)
+
+        repAmount = math.floor(activityPoints.masterRep * quantity * diminishingMult)
+        FreeGangs.Server.AddGangReputation(gangData.gang.name, repAmount, citizenid, 'drug_sale')
+
+        if currentZone then
+            local influenceAmount = activityPoints.zoneInfluence * quantity
+            AddZoneInfluence(currentZone, gangData.gang.name, influenceAmount)
+        end
+
+        heatAmount = activityPoints.heat * quantity
+        FreeGangs.Server.AddPlayerHeat(citizenid, heatAmount)
+
+        stats.drugSales = stats.drugSales + quantity
+
+        FreeGangs.Server.DB.Log(gangData.gang.name, citizenid, 'external_drug_sale', FreeGangs.LogCategories.ACTIVITY, {
+            drug = drugItem,
+            quantity = quantity,
+            cash = cashEarned,
+            zone = currentZone,
+        })
+    end
+
+    -- Record lifetime stats
+    RecordCrimeStat(citizenid, 'drug_sale', { cash = cashEarned })
+
+    -- Record in dynamic market
+    RecordDrugSale(currentZone, drugItem, quantity)
+
+    -- Trigger dispatch
+    TriggerDispatch(source, 'drug_sale', 2, { drug = drugItem, quantity = quantity })
+
+    return true, {
+        rep = repAmount,
+        heat = heatAmount,
+    }
+end
+
+-- ============================================================================
 -- CLEANUP THREADS
 -- ============================================================================
 
@@ -1063,9 +1398,18 @@ CreateThread(function()
     CleanupNPCCooldowns()
     CleanupHourlyStats()
     while true do
-        Wait(300000)
+        Wait(300000) -- 5 minutes
         CleanupNPCCooldowns()
         CleanupHourlyStats()
+    end
+end)
+
+-- Drought event check thread (runs hourly)
+CreateThread(function()
+    Wait(60000) -- Initial 1-minute delay
+    while true do
+        CheckDroughtEvents()
+        Wait(3600000) -- Check every hour
     end
 end)
 

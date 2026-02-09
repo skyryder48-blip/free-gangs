@@ -23,6 +23,7 @@ local currentMugTarget = nil
 local recentMugTargets = {}          -- ped -> gameTimer of last attempt
 local MUG_RETRIGGER_COOLDOWN = 10000 -- 10 seconds before can auto-mug same NPC again
 local blacklistedPedHashes = nil     -- lazily built hash set from config
+local resistancePedHashes = nil  -- lazily built hash map: pedHash -> category
 
 -- ============================================================================
 -- UTILITY FUNCTIONS
@@ -54,6 +55,36 @@ local function IsBlacklistedPed(ped)
         end
     end
     return blacklistedPedHashes[GetEntityModel(ped)] == true
+end
+
+---Classify an NPC's resistance category based on ped model
+---@param ped number Ped handle
+---@return string|nil category ('armed', 'gang', 'wealthy', or nil for civilian)
+local function GetNPCResistanceCategory(ped)
+    local resistConfig = FreeGangs.Config.Activities.Mugging.Resistance
+    if not resistConfig or not resistConfig.Enabled then return nil end
+
+    -- Build hash map on first use
+    if not resistancePedHashes then
+        resistancePedHashes = {}
+        if resistConfig.ArmedPedModels then
+            for _, model in ipairs(resistConfig.ArmedPedModels) do
+                resistancePedHashes[GetHashKey(model)] = 'armed'
+            end
+        end
+        if resistConfig.GangPedModels then
+            for _, model in ipairs(resistConfig.GangPedModels) do
+                resistancePedHashes[GetHashKey(model)] = 'gang'
+            end
+        end
+        if resistConfig.WealthyPedModels then
+            for _, model in ipairs(resistConfig.WealthyPedModels) do
+                resistancePedHashes[GetHashKey(model)] = 'wealthy'
+            end
+        end
+    end
+
+    return resistancePedHashes[GetEntityModel(ped)]
 end
 
 ---Check if player has a weapon that can be used for mugging
@@ -210,7 +241,9 @@ function FreeGangs.Client.Activities.StartMugging(targetPed)
     currentMugTarget = targetPed
 
     -- Notify server of start (for anti-cheat tracking)
-    TriggerServerEvent('freegangs:server:startMugging', targetNetId)
+    -- Classify NPC for resistance system
+    local npcCategory = GetNPCResistanceCategory(targetPed)
+    TriggerServerEvent('freegangs:server:startMugging', targetNetId, npcCategory)
 
     -- Face target
     local ped = FreeGangs.Client.GetPlayerPed()
@@ -289,6 +322,23 @@ function FreeGangs.Client.Activities.StartMugging(targetPed)
 
             if rewards and rewards.rep and rewards.rep > 0 then
                 FreeGangs.Bridge.Notify('+' .. rewards.rep .. ' reputation', 'inform', 3000)
+            end
+        elseif rewards and rewards.resisted then
+            -- NPC fought back! Make NPC attack player
+            FreeGangs.Bridge.Notify(message, 'error')
+            if DoesEntityExist(targetPed) and not IsPedDeadOrDying(targetPed) then
+                TriggerNPCReaction(targetPed, 'aggressive')
+
+                -- NPC fights for configured duration then flees
+                local fightDuration = FreeGangs.Config.Activities.Mugging.Resistance
+                    and FreeGangs.Config.Activities.Mugging.Resistance.FightBackDuration or 8000
+                CreateThread(function()
+                    Wait(fightDuration)
+                    if DoesEntityExist(targetPed) and not IsPedDeadOrDying(targetPed) then
+                        ClearPedTasks(targetPed)
+                        TaskReactAndFleePed(targetPed, PlayerPedId())
+                    end
+                end)
             end
         else
             FreeGangs.Bridge.Notify(message, 'error')
@@ -414,6 +464,10 @@ function FreeGangs.Client.Activities.StartPickpocket(targetPed)
     local successfulRolls = 0
     local detected = false
 
+    -- Get skill check config
+    local skillCheckConfig = config.SkillCheck
+    local useSkillCheck = skillCheckConfig and skillCheckConfig.Enabled
+
     for roll = 1, rolls do
         -- Check NPC still exists and is alive
         if not DoesEntityExist(targetPed) or IsPedDeadOrDying(targetPed) then
@@ -432,10 +486,10 @@ function FreeGangs.Client.Activities.StartPickpocket(targetPed)
         -- Sneak animation
         PlayAnim('anim@amb@clubhouse@tutorial@bkr_tut_ig3@', 'machinic_loop_mechandplayer', -1, 49)
 
-        -- Progress bar
-        local success = lib.progressBar({
-            duration = 2000,
-            label = string.format('Pickpocketing (%d/%d)...', roll, rolls),
+        -- Progress bar for the "reach" phase
+        local progressSuccess = lib.progressBar({
+            duration = 1300,
+            label = string.format('Reaching into pocket (%d/%d)...', roll, rolls),
             useWhileDead = false,
             canCancel = true,
             disable = {
@@ -445,38 +499,61 @@ function FreeGangs.Client.Activities.StartPickpocket(targetPed)
             },
         })
 
-        if not success then
+        if not progressSuccess then
             StopAnim()
             FreeGangs.Bridge.Notify('Pickpocket cancelled', 'warning')
             break
         end
 
+        StopAnim()
+
         -- Recheck NPC exists and is alive
         if not DoesEntityExist(targetPed) or IsPedDeadOrDying(targetPed) then
-            StopAnim()
             FreeGangs.Bridge.Notify('Target is no longer available', 'error')
             break
         end
 
-        -- Recheck distance after roll
+        -- Recheck distance after progress
         playerCoords = GetEntityCoords(ped)
         targetCoords = GetEntityCoords(targetPed)
         if #(playerCoords - targetCoords) > maxDistance then
-            StopAnim()
             detected = true
             FreeGangs.Bridge.Notify(FreeGangs.L('activities', 'pickpocket_detected'), 'error')
             TriggerNPCReaction(targetPed, 'aggressive')
             break
         end
 
-        -- Per-roll detection chance (escalates: roll 1 = base, roll 2 = base+per, etc.)
-        local detectChance = baseDetectChance + (detectPerRoll * (roll - 1))
-        if math.random(100) <= detectChance then
-            StopAnim()
-            detected = true
-            FreeGangs.Bridge.Notify(FreeGangs.L('activities', 'pickpocket_detected'), 'error')
-            TriggerNPCReaction(targetPed, 'aggressive')
-            break
+        -- DETECTION CHECK: skill check or RNG fallback
+        if useSkillCheck then
+            -- Build skill check difficulty for this roll
+            local difficulty = skillCheckConfig.DifficultyPerRoll and skillCheckConfig.DifficultyPerRoll[roll] or 'easy'
+            local speed = skillCheckConfig.SpeedPerRoll and skillCheckConfig.SpeedPerRoll[roll] or 1.0
+            local inputs = skillCheckConfig.InputsPerRoll and skillCheckConfig.InputsPerRoll[roll] or 1
+
+            -- Build the difficulty table for lib.skillCheck
+            -- Each input is a {difficulty, speedMultiplier} pair
+            local skillInputs = {}
+            for i = 1, inputs do
+                skillInputs[i] = { difficulty, speed }
+            end
+
+            local passed = lib.skillCheck(skillInputs)
+
+            if not passed then
+                detected = true
+                FreeGangs.Bridge.Notify(FreeGangs.L('activities', 'pickpocket_detected'), 'error')
+                TriggerNPCReaction(targetPed, 'aggressive')
+                break
+            end
+        else
+            -- Fallback: pure RNG detection (original system)
+            local detectChance = baseDetectChance + (detectPerRoll * (roll - 1))
+            if math.random(100) <= detectChance then
+                detected = true
+                FreeGangs.Bridge.Notify(FreeGangs.L('activities', 'pickpocket_detected'), 'error')
+                TriggerNPCReaction(targetPed, 'aggressive')
+                break
+            end
         end
 
         successfulRolls = successfulRolls + 1
