@@ -17,6 +17,7 @@ FreeGangs.Client.Activities = {}
 
 local isPerformingActivity = false
 local targetingEnabled = false
+local drugSaleKeybindRegistered = false
 local muggingThreadActive = false
 local currentMugTarget = nil
 local recentMugTargets = {}          -- ped -> gameTimer of last attempt
@@ -819,6 +820,39 @@ end
 -- OX_TARGET INTEGRATION
 -- ============================================================================
 
+---Find the nearest non-player NPC within a given distance
+---@param maxDist number Maximum search distance
+---@return number|nil ped The nearest NPC ped handle, or nil
+local function GetNearestNPC(maxDist)
+    local ped = FreeGangs.Client.GetPlayerPed()
+    local playerCoords = GetEntityCoords(ped)
+    local closestPed = nil
+    local closestDist = maxDist
+
+    for _, npc in ipairs(GetGamePool('CPed')) do
+        if npc ~= ped and not IsPedAPlayer(npc) and not IsPedDeadOrDying(npc) then
+            local dist = #(playerCoords - GetEntityCoords(npc))
+            if dist < closestDist then
+                closestDist = dist
+                closestPed = npc
+            end
+        end
+    end
+
+    return closestPed
+end
+
+---Keybind handler: sell drugs to nearest NPC within 1.5 units
+local function OnDrugSaleKeybind()
+    if not FreeGangs.Client.PlayerGang then return end
+    if isPerformingActivity then return end
+
+    local nearestNPC = GetNearestNPC(1.5)
+    if not nearestNPC then return end
+
+    FreeGangs.Client.Activities.StartDrugSale(nearestNPC)
+end
+
 ---Setup ox_target options for NPCs (pickpocket + drug sale only; mugging is auto-triggered)
 function FreeGangs.Client.Activities.SetupTargeting()
     if targetingEnabled then return end
@@ -882,6 +916,16 @@ function FreeGangs.Client.Activities.SetupTargeting()
         },
     })
     
+    -- Register drug sale keybind (G key by default, player can remap in settings)
+    if not drugSaleKeybindRegistered then
+        RegisterCommand('+freegangs_drugsale', function()
+            OnDrugSaleKeybind()
+        end, false)
+        RegisterCommand('-freegangs_drugsale', function() end, false)
+        RegisterKeyMapping('+freegangs_drugsale', 'Sell Drugs to Nearby NPC', 'keyboard', 'G')
+        drugSaleKeybindRegistered = true
+    end
+
     targetingEnabled = true
     FreeGangs.Utils.Debug('Activity targeting enabled')
 end
