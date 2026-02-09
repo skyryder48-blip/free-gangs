@@ -178,17 +178,24 @@ function FreeGangs.Client.Territory.OnEnterZone(zoneName, config)
         config = config,
         enteredAt = GetGameTimer(),
     }
-    
+
     -- Get real-time data from GlobalState
     local stateData = GlobalState['territory:' .. zoneName]
     if stateData then
         currentZone.influence = stateData.influence
         currentZone.owner = stateData.owner
     end
-    
+
+    -- Sync shared CurrentZone state so cache.lua, bribes.lua, etc. can read it
+    FreeGangs.Client.CurrentZone = {
+        name = zoneName,
+        data = config,
+        enteredAt = currentZone.enteredAt,
+    }
+
     -- Update HUD state
     FreeGangs.Client.Territory.UpdateHUDState(zoneName)
-    
+
     -- Notify server
     TriggerServerEvent(FreeGangs.Events.Server.ENTER_TERRITORY, zoneName)
 
@@ -207,12 +214,15 @@ function FreeGangs.Client.Territory.OnEnterZone(zoneName, config)
         -- Check heat stage with rival
         local heatInfo = FreeGangs.Client.Cache.GetHeat(owner)
         local heatStage = heatInfo and heatInfo.stage or 'neutral'
-        
+
         if heatStage == 'cold_war' or heatStage == 'rivalry' or heatStage == 'war_ready' then
             FreeGangs.Bridge.Notify('Warning: You are in hostile territory!', 'warning', 5000)
         end
     end
-    
+
+    -- Load nearby graffiti for this zone
+    FreeGangs.Client.LoadNearbyGraffiti()
+
     FreeGangs.Utils.Debug('Entered zone:', zoneName)
 end
 
@@ -222,11 +232,17 @@ end
 function FreeGangs.Client.Territory.OnExitZone(zoneName, config)
     -- Notify server
     TriggerServerEvent(FreeGangs.Events.Server.EXIT_TERRITORY, zoneName)
-    
+
     -- Clear HUD
     zoneHUD.active = false
     currentZone = nil
-    
+
+    -- Clear shared CurrentZone state
+    FreeGangs.Client.CurrentZone = nil
+
+    -- Clear graffiti visuals for the zone we just left
+    FreeGangs.Client.ClearNearbyGraffiti()
+
     FreeGangs.Utils.Debug('Exited zone:', zoneName)
 end
 

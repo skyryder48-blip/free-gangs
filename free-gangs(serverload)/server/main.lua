@@ -62,12 +62,9 @@ function FreeGangs.Server.LoadAllData()
     end
     FreeGangs.Utils.Log('Loaded ' .. FreeGangs.Utils.TableLength(FreeGangs.Server.Gangs) .. ' gangs')
     
-    -- Load territories
-    local territories = FreeGangs.Server.DB.GetAllTerritories()
-    for _, territory in pairs(territories) do
-        FreeGangs.Server.Territories[territory.name] = territory
-    end
-    FreeGangs.Utils.Log('Loaded ' .. FreeGangs.Utils.TableLength(FreeGangs.Server.Territories) .. ' territories')
+    -- Initialize territory system (syncs config with DB, sets up GlobalState, starts presence thread)
+    FreeGangs.Server.Territory.Initialize()
+    FreeGangs.Utils.Log('Initialized ' .. FreeGangs.Utils.TableLength(FreeGangs.Server.Territories) .. ' territories')
     
     -- Load heat data
     local heatData = FreeGangs.Server.DB.GetAllHeat()
@@ -140,12 +137,12 @@ function FreeGangs.Server.StartBackgroundTasks()
         end
     end)
     
-    -- Territory influence decay task
+    -- Territory influence decay task (uses module's richer decay with zone type modifiers and neighbor bonuses)
     CreateThread(function()
         local decayInterval = FreeGangs.Config.Territory.DecayIntervalHours * 60 * 60 * 1000
         while true do
             Wait(decayInterval)
-            FreeGangs.Server.ProcessTerritoryDecay()
+            FreeGangs.Server.Territory.ProcessDecay()
         end
     end)
     
@@ -207,30 +204,6 @@ function FreeGangs.Server.ProcessReputationDecay()
     end
     
     FreeGangs.Utils.Debug('Processed reputation decay for all gangs')
-end
-
----Process territory influence decay
-function FreeGangs.Server.ProcessTerritoryDecay()
-    local decayPercent = FreeGangs.Config.Territory.DecayPercentage
-    
-    for zoneName, territory in pairs(FreeGangs.Server.Territories) do
-        local influence = territory.influence or {}
-        local changed = false
-        
-        for gangName, percent in pairs(influence) do
-            local newPercent = math.max(0, percent - decayPercent)
-            if newPercent ~= percent then
-                influence[gangName] = newPercent > 0 and newPercent or nil
-                changed = true
-            end
-        end
-        
-        if changed then
-            FreeGangs.Server.UpdateTerritoryInfluence(zoneName, influence)
-        end
-    end
-    
-    FreeGangs.Utils.Debug('Processed territory decay')
 end
 
 ---Process heat decay between gangs
@@ -982,6 +955,21 @@ RegisterNetEvent('free-gangs:server:terminateBribe', function(contactType)
     else
         FreeGangs.Bridge.Notify(source, 'No active contact of that type', 'error')
     end
+end)
+
+-- Update territory influence from client activity
+RegisterNetEvent(FreeGangs.Events.Server.UPDATE_INFLUENCE, function(zoneName, amount, reason)
+    local source = source
+    local citizenid = FreeGangs.Bridge.GetCitizenId(source)
+    if not citizenid then return end
+
+    local membership = FreeGangs.Server.DB.GetPlayerMembership(citizenid)
+    if not membership then return end
+
+    -- Validate amount is reasonable (prevent exploits)
+    if type(amount) ~= 'number' or amount <= 0 or amount > 50 then return end
+
+    FreeGangs.Server.Territory.AddInfluence(zoneName, membership.gang_name, amount, reason or 'client_activity')
 end)
 
 -- Set main corner (Street Gang archetype)

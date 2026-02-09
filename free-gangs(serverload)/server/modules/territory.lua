@@ -17,6 +17,7 @@ FreeGangs.Server.Territory = {}
 local territoryCache = {}
 local presenceTracking = {} -- Track player presence per zone
 local cooldownTimers = {}   -- Zone capture cooldowns
+local contestedAlerts = {}  -- Track contested territory alerts to prevent spam (keys: "zoneName:gangName")
 
 -- ============================================================================
 -- INITIALIZATION
@@ -227,7 +228,43 @@ function FreeGangs.Server.Territory.AddInfluence(zoneName, gangName, amount, rea
     -- Normalize all influence to ensure total doesn't exceed 100%
     territory.influence[gangName] = math.max(0, newInfluence)
     FreeGangs.Server.Territory.NormalizeInfluence(zoneName)
-    
+
+    -- Check for contested territory alerts
+    local ownerGang = FreeGangs.Server.Territory.GetOwner(zoneName)
+    if ownerGang then
+        -- Check if a rival gang's influence crossed the 25% threshold
+        if gangName ~= ownerGang then
+            local rivalInfluence = territory.influence[gangName] or 0
+            local alertKey = zoneName .. ':' .. gangName
+
+            if rivalInfluence >= 25 and not contestedAlerts[alertKey] then
+                contestedAlerts[alertKey] = true
+                local ownerMembers = FreeGangs.Server.Members.GetOnlineMembers(ownerGang)
+                for _, memberSource in pairs(ownerMembers) do
+                    TriggerClientEvent(FreeGangs.Events.Client.TERRITORY_ALERT, memberSource, zoneName, 'contested', {
+                        rivalGang = gangName,
+                        rivalInfluence = rivalInfluence,
+                    })
+                end
+                FreeGangs.Utils.Debug(string.format('Contested alert: %s at %.1f%% in %s (owned by %s)',
+                    gangName, rivalInfluence, zoneName, ownerGang))
+            elseif rivalInfluence < 20 and contestedAlerts[alertKey] then
+                -- Reset alert when rival drops below 20% (hysteresis to prevent spam)
+                contestedAlerts[alertKey] = nil
+            end
+        end
+
+        -- Also reset alerts for other gangs whose influence dropped due to normalization
+        for otherGang, influence in pairs(territory.influence) do
+            if otherGang ~= ownerGang and otherGang ~= gangName then
+                local alertKey = zoneName .. ':' .. otherGang
+                if influence < 20 and contestedAlerts[alertKey] then
+                    contestedAlerts[alertKey] = nil
+                end
+            end
+        end
+    end
+
     -- Mark for database update
     FreeGangs.Server.Cache.MarkDirty('territory', zoneName)
     
@@ -510,7 +547,14 @@ function FreeGangs.Server.Territory.CheckCapture(zoneName, triggeringGang)
     -- Case 1: Zone becomes owned by a new gang
     if dominant and dominantInfluence >= majority then
         if currentOwner ~= dominant then
-            FreeGangs.Server.Territory.ProcessCapture(zoneName, currentOwner, dominant)
+            -- Enforce territory cap: only allow capture if the gang hasn't reached their max
+            if FreeGangs.Server.Territory.CanClaimNewTerritory(dominant) then
+                FreeGangs.Server.Territory.ProcessCapture(zoneName, currentOwner, dominant)
+            else
+                FreeGangs.Utils.Debug(string.format(
+                    'Gang %s reached territory limit, capture blocked for zone %s',
+                    dominant, zoneName))
+            end
         end
     end
     
@@ -837,13 +881,10 @@ end
 function FreeGangs.Server.Territory.CanClaimNewTerritory(gangName)
     local gang = FreeGangs.Server.GetGang(gangName)
     if not gang then return false end
-    
-    local levelInfo = FreeGangs.ReputationLevels[gang.master_level]
-    if not levelInfo then return false end
-    
-    local maxTerritories = levelInfo.maxTerritories
+
+    local maxTerritories = FreeGangs.GetMaxTerritories(gang.master_level)
     if maxTerritories == -1 then return true end -- Unlimited
-    
+
     local currentCount = FreeGangs.Server.Territory.CountOwnedTerritories(gangName)
     return currentCount < maxTerritories
 end
