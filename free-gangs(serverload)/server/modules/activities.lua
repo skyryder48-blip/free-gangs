@@ -150,6 +150,14 @@ local function IsNPCOnCooldown(netId, activity)
     return expiry and os.time() < expiry
 end
 
+---Check if NPC is on cooldown (exposed for callback validation)
+---@param netId number
+---@param activity string
+---@return boolean
+function FreeGangs.Server.Activities.IsNPCOnCooldown(netId, activity)
+    return IsNPCOnCooldown(netId, activity)
+end
+
 ---Set NPC cooldown
 ---@param netId number
 ---@param activity string
@@ -937,21 +945,50 @@ function FreeGangs.Server.GetZoneOwner(zoneName)
     return nil
 end
 
----Get player's gang data
+-- Player gang data cache: source -> { data, expiry }
+local playerGangCache = {}
+local GANG_CACHE_TTL = 30 -- Cache for 30 seconds
+
+---Get player's gang data (optimized: single DB query + cache)
 ---@param source number
 ---@return table|nil {gang, membership}
 function FreeGangs.Server.GetPlayerGangData(source)
+    local now = os.time()
+    local cached = playerGangCache[source]
+    if cached and now < cached.expiry then
+        return cached.data
+    end
+
     local citizenid = FreeGangs.Bridge.GetCitizenId(source)
     if not citizenid then return nil end
-    
-    for gangName, gang in pairs(FreeGangs.Server.Gangs) do
-        local member = FreeGangs.Server.DB.GetMember(gangName, citizenid)
-        if member then
-            return { gang = gang, membership = member }
-        end
+
+    -- Single DB query instead of looping all gangs
+    local membership = FreeGangs.Server.DB.GetPlayerMembership(citizenid)
+    if not membership or not membership.gang_name then
+        playerGangCache[source] = { data = nil, expiry = now + GANG_CACHE_TTL }
+        return nil
     end
-    
-    return nil
+
+    local gang = FreeGangs.Server.Gangs[membership.gang_name]
+    if not gang then
+        playerGangCache[source] = { data = nil, expiry = now + GANG_CACHE_TTL }
+        return nil
+    end
+
+    local data = { gang = gang, membership = membership }
+    playerGangCache[source] = { data = data, expiry = now + GANG_CACHE_TTL }
+    return data
+end
+
+---Invalidate a player's cached gang data
+---@param source number
+function FreeGangs.Server.InvalidatePlayerGangCache(source)
+    playerGangCache[source] = nil
+end
+
+---Invalidate all cached gang data (e.g., on gang structure changes)
+function FreeGangs.Server.InvalidateAllPlayerGangCache()
+    playerGangCache = {}
 end
 
 ---Check if player has a specific permission
@@ -976,6 +1013,27 @@ function FreeGangs.Server.HasPermission(source, permission)
     
     local rankPerms = FreeGangs.DefaultRankPermissions[tostring(membership.rank)]
     return rankPerms and rankPerms[permission] or false
+end
+
+-- ============================================================================
+-- DB COMPATIBILITY
+-- ============================================================================
+
+-- DB.GetMember wrapper: used by heat/war callbacks with (citizenid) or (gangName, citizenid)
+if not FreeGangs.Server.DB.GetMember then
+    function FreeGangs.Server.DB.GetMember(gangNameOrCitizenid, citizenid)
+        if citizenid then
+            -- Called as GetMember(gangName, citizenid) - check specific gang
+            local membership = FreeGangs.Server.DB.GetPlayerMembership(citizenid)
+            if membership and membership.gang_name == gangNameOrCitizenid then
+                return membership
+            end
+            return nil
+        else
+            -- Called as GetMember(citizenid) - get any gang membership
+            return FreeGangs.Server.DB.GetPlayerMembership(gangNameOrCitizenid)
+        end
+    end
 end
 
 -- ============================================================================

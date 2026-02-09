@@ -6,6 +6,14 @@
 ]]
 
 -- ============================================================================
+-- ACTIVITY TRACKING (anti-cheat: validate timing and targets)
+-- ============================================================================
+
+local activeMuggings = {}     -- source -> { targetNetId, startTime }
+local activePickpockets = {}  -- source -> { targetNetId, startTime }
+local activeDrugSales = {}    -- source -> { targetNetId, startTime }
+
+-- ============================================================================
 -- ACTIVITY VALIDATION CALLBACKS
 -- ============================================================================
 
@@ -80,23 +88,43 @@ end)
 ---Process mugging completion
 lib.callback.register('freegangs:activities:completeMugging', function(source, targetNetId)
     if not targetNetId or type(targetNetId) ~= 'number' then return false, 'Invalid target' end
+
+    -- Validate that mugging was started via server event
+    local tracking = activeMuggings[source]
+    if not tracking then return false, 'No active mugging' end
+    if tracking.targetNetId ~= targetNetId then return false, 'Target mismatch' end
+
+    -- Validate minimum time (progress bar is 3 seconds)
+    local elapsed = os.time() - tracking.startTime
+    if elapsed < 2 then return false, 'Too fast' end
+
+    -- Clear tracking
+    activeMuggings[source] = nil
+
     return FreeGangs.Server.Activities.Mug(source, targetNetId)
 end)
 
 ---Validate mugging target
 lib.callback.register('freegangs:activities:validateMugTarget', function(source, targetNetId)
+    if not targetNetId or type(targetNetId) ~= 'number' then return false, 'Invalid target' end
+
     local citizenid = FreeGangs.Bridge.GetCitizenId(source)
     if not citizenid then return false, 'Not loaded' end
-    
+
     local gangData = FreeGangs.Server.GetPlayerGangData(source)
     if not gangData then return false, 'Not in gang' end
-    
+
     -- Check player cooldown
     local cooldownRemaining = FreeGangs.Server.GetCooldownRemaining(source, 'mugging')
     if cooldownRemaining > 0 then
         return false, FreeGangs.L('activities', 'on_cooldown', FreeGangs.Utils.FormatDuration(cooldownRemaining * 1000))
     end
-    
+
+    -- Check NPC cooldown
+    if FreeGangs.Server.Activities.IsNPCOnCooldown(targetNetId, 'mugging') then
+        return false, FreeGangs.L('activities', 'invalid_target')
+    end
+
     return true
 end)
 
@@ -106,17 +134,54 @@ end)
 
 ---Process pickpocket completion
 lib.callback.register('freegangs:activities:completePickpocket', function(source, targetNetId, success)
+    if not targetNetId or type(targetNetId) ~= 'number' then return false, 'Invalid target' end
+
+    -- Validate that pickpocket was started via server event
+    local tracking = activePickpockets[source]
+    if not tracking then return false, 'No active pickpocket' end
+    if tracking.targetNetId ~= targetNetId then return false, 'Target mismatch' end
+
+    -- Validate minimum time (each roll is 2 seconds)
+    local elapsed = os.time() - tracking.startTime
+    if elapsed < 1 then return false, 'Too fast' end
+
+    -- Clear tracking
+    activePickpockets[source] = nil
+
+    -- Validate client success claim: if they claim all rolls succeeded,
+    -- check enough time passed for the configured number of rolls
+    if success then
+        local config = FreeGangs.Config.Activities.Pickpocket
+        local rolls = config and config.LootRolls or 3
+        if elapsed < rolls then
+            success = false -- Too fast for all rolls
+        end
+    end
+
     return FreeGangs.Server.Activities.Pickpocket(source, targetNetId, success)
 end)
 
 ---Validate pickpocket target
 lib.callback.register('freegangs:activities:validatePickpocketTarget', function(source, targetNetId)
+    if not targetNetId or type(targetNetId) ~= 'number' then return false, 'Invalid target' end
+
     local citizenid = FreeGangs.Bridge.GetCitizenId(source)
     if not citizenid then return false, 'Not loaded' end
-    
+
     local gangData = FreeGangs.Server.GetPlayerGangData(source)
     if not gangData then return false, 'Not in gang' end
-    
+
+    -- Check player cooldown
+    local cooldownRemaining = FreeGangs.Server.GetCooldownRemaining(source, 'pickpocket')
+    if cooldownRemaining > 0 then
+        return false, FreeGangs.L('activities', 'on_cooldown', FreeGangs.Utils.FormatDuration(cooldownRemaining * 1000))
+    end
+
+    -- Check NPC cooldown
+    if FreeGangs.Server.Activities.IsNPCOnCooldown(targetNetId, 'pickpocket') then
+        return false, FreeGangs.L('activities', 'invalid_target')
+    end
+
     return true
 end)
 
@@ -129,6 +194,18 @@ lib.callback.register('freegangs:activities:completeDrugSale', function(source, 
     -- Validate parameters
     if not targetNetId or type(targetNetId) ~= 'number' then return false, 'Invalid target' end
     if not drugItem or type(drugItem) ~= 'string' then return false, 'Invalid drug item' end
+
+    -- Validate that drug sale was started via server event
+    local tracking = activeDrugSales[source]
+    if not tracking then return false, 'No active drug sale' end
+
+    -- Validate minimum time (progress bar is 2.5 seconds)
+    local elapsed = os.time() - tracking.startTime
+    if elapsed < 2 then return false, 'Too fast' end
+
+    -- Clear tracking
+    activeDrugSales[source] = nil
+
     return FreeGangs.Server.Activities.SellDrug(source, targetNetId, drugItem, quantity or 1)
 end)
 
@@ -350,23 +427,30 @@ end)
 -- SERVER EVENTS
 -- ============================================================================
 
--- Handle mugging start (for tracking)
+-- Handle mugging start (track for completion validation)
 RegisterNetEvent('freegangs:server:startMugging', function(targetNetId)
     local source = source
-    -- Client is notifying server of mugging start
-    -- This allows server-side validation if needed
+    if type(targetNetId) == 'number' then
+        activeMuggings[source] = { targetNetId = targetNetId, startTime = os.time() }
+    end
     FreeGangs.Utils.Debug('Player', source, 'starting mugging on', targetNetId)
 end)
 
--- Handle pickpocket start
+-- Handle pickpocket start (track for completion validation)
 RegisterNetEvent('freegangs:server:startPickpocket', function(targetNetId)
     local source = source
+    if type(targetNetId) == 'number' then
+        activePickpockets[source] = { targetNetId = targetNetId, startTime = os.time() }
+    end
     FreeGangs.Utils.Debug('Player', source, 'starting pickpocket on', targetNetId)
 end)
 
--- Handle drug sale start
+-- Handle drug sale start (track for completion validation)
 RegisterNetEvent('freegangs:server:startDrugSale', function(targetNetId)
     local source = source
+    if type(targetNetId) == 'number' then
+        activeDrugSales[source] = { targetNetId = targetNetId, startTime = os.time() }
+    end
     FreeGangs.Utils.Debug('Player', source, 'starting drug sale to', targetNetId)
 end)
 

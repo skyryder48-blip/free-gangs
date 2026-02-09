@@ -227,8 +227,11 @@ FreeGangs.Config.Activities = {
         -- Required weapon types (must have one equipped)
         RequiredWeapons = { 'pistol', 'smg' },
         
-        -- Maximum distance to target NPC
+        -- Maximum distance to target NPC (auto-trigger range)
         MaxDistance = 5.0,
+
+        -- Distance at which mugging cancels during progress
+        CancelDistance = 8.0,
 
         -- NPC cooldown after being mugged (in seconds)
         NPCCooldown = 86400, -- 24 hours

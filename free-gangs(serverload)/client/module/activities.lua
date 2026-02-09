@@ -17,6 +17,10 @@ FreeGangs.Client.Activities = {}
 
 local isPerformingActivity = false
 local targetingEnabled = false
+local muggingThreadActive = false
+local currentMugTarget = nil
+local recentMugTargets = {}          -- ped -> gameTimer of last attempt
+local MUG_RETRIGGER_COOLDOWN = 10000 -- 10 seconds before can auto-mug same NPC again
 
 -- ============================================================================
 -- UTILITY FUNCTIONS
@@ -123,54 +127,70 @@ local function TriggerNPCReaction(ped, reaction)
 end
 
 -- ============================================================================
--- MUGGING SYSTEM
+-- MUGGING SYSTEM (Auto-trigger on weapon approach, distance-based cancel)
 -- ============================================================================
 
----Start mugging an NPC
+---Start mugging an NPC (auto-triggered by proximity detection)
 ---@param targetPed number Target NPC ped handle
 function FreeGangs.Client.Activities.StartMugging(targetPed)
-    if isPerformingActivity then
-        FreeGangs.Bridge.Notify(FreeGangs.L('errors', 'generic'), 'error')
-        return
-    end
-    
-    -- Check weapon
-    if not HasMugWeapon() then
-        FreeGangs.Bridge.Notify(FreeGangs.L('activities', 'mugging_no_weapon'), 'error')
-        return
-    end
-    
+    if isPerformingActivity then return end
+    if not HasMugWeapon() then return end
+
     -- Validate target with server
     local targetNetId = NetworkGetNetworkIdFromEntity(targetPed)
     local canMug, errorMsg = lib.callback.await('freegangs:activities:validateMugTarget', false, targetNetId)
-    
+
     if not canMug then
         FreeGangs.Bridge.Notify(errorMsg, 'error')
+        recentMugTargets[targetPed] = GetGameTimer()
         return
     end
-    
+
     SetBusy(true)
-    
-    -- Notify server of start
+    currentMugTarget = targetPed
+
+    -- Notify server of start (for anti-cheat tracking)
     TriggerServerEvent('freegangs:server:startMugging', targetNetId)
-    
+
     -- Make NPC react
     TriggerNPCReaction(targetPed, 'hands_up')
-    
+
     -- Face target
     local ped = FreeGangs.Client.GetPlayerPed()
     local targetCoords = GetEntityCoords(targetPed)
     TaskTurnPedToFaceCoord(ped, targetCoords.x, targetCoords.y, targetCoords.z, 1000)
     Wait(500)
-    
-    -- Progress bar (with aim animation)
+
+    -- Start distance monitor thread (cancels progress if too far)
+    local cancelDistance = FreeGangs.Config.Activities.Mugging.CancelDistance or 8.0
+    local distanceCancelled = false
+
+    CreateThread(function()
+        while isPerformingActivity and currentMugTarget do
+            if not DoesEntityExist(currentMugTarget) then
+                distanceCancelled = true
+                lib.cancelProgress()
+                break
+            end
+            local playerCoords = GetEntityCoords(FreeGangs.Client.GetPlayerPed())
+            local tgtCoords = GetEntityCoords(currentMugTarget)
+            local dist = #(playerCoords - tgtCoords)
+            if dist > cancelDistance then
+                distanceCancelled = true
+                lib.cancelProgress()
+                break
+            end
+            Wait(100)
+        end
+    end)
+
+    -- Progress bar (movement enabled for distance-based cancel)
     local success = lib.progressBar({
         duration = 3000,
         label = 'Mugging...',
         useWhileDead = false,
         canCancel = true,
         disable = {
-            move = true,
             car = true,
             combat = true,
         },
@@ -180,35 +200,98 @@ function FreeGangs.Client.Activities.StartMugging(targetPed)
             flag = 49,
         },
     })
-    
+
     StopAnim()
-    
-    if success then
+    currentMugTarget = nil
+
+    if success and not distanceCancelled then
         -- Complete mugging on server
         local mugSuccess, message, rewards = lib.callback.await('freegangs:activities:completeMugging', false, targetNetId)
-        
+
         if mugSuccess then
             FreeGangs.Bridge.Notify(message, 'success')
-            
-            -- NPC flees after being mugged
             TriggerNPCReaction(targetPed, 'scared')
-            
-            -- Show rewards
-            if rewards then
-                if rewards.rep and rewards.rep > 0 then
-                    FreeGangs.Bridge.Notify('+' .. rewards.rep .. ' reputation', 'inform', 3000)
-                end
+
+            if rewards and rewards.rep and rewards.rep > 0 then
+                FreeGangs.Bridge.Notify('+' .. rewards.rep .. ' reputation', 'inform', 3000)
             end
         else
             FreeGangs.Bridge.Notify(message, 'error')
         end
     else
-        FreeGangs.Bridge.Notify('Mugging cancelled', 'warning')
-        -- NPC runs away if mugging cancelled
+        if distanceCancelled then
+            FreeGangs.Bridge.Notify('Mugging cancelled - too far from target', 'warning')
+        else
+            FreeGangs.Bridge.Notify('Mugging cancelled', 'warning')
+        end
         TriggerNPCReaction(targetPed, 'scared')
     end
-    
+
+    -- Track target to prevent immediate re-trigger
+    recentMugTargets[targetPed] = GetGameTimer()
+
     SetBusy(false)
+end
+
+-- ============================================================================
+-- MUGGING PROXIMITY DETECTION
+-- ============================================================================
+
+---Start the mugging detection thread (auto-trigger on weapon approach)
+local function StartMuggingDetection()
+    if muggingThreadActive then return end
+    muggingThreadActive = true
+
+    CreateThread(function()
+        while muggingThreadActive do
+            local sleep = 500
+
+            if FreeGangs.Client.PlayerGang and not isPerformingActivity and HasMugWeapon() then
+                sleep = 200
+                local ped = FreeGangs.Client.GetPlayerPed()
+                local coords = GetEntityCoords(ped)
+                local maxDist = FreeGangs.Config.Activities.Mugging.MaxDistance or 5.0
+                local now = GetGameTimer()
+
+                -- Clean up expired recent targets
+                for targetPed, timestamp in pairs(recentMugTargets) do
+                    if now - timestamp > MUG_RETRIGGER_COOLDOWN or not DoesEntityExist(targetPed) then
+                        recentMugTargets[targetPed] = nil
+                    end
+                end
+
+                -- Find closest valid NPC within range
+                local closestPed, closestDist = nil, maxDist + 1
+                local peds = GetGamePool('CPed')
+
+                for _, npcPed in pairs(peds) do
+                    if npcPed ~= ped
+                       and not IsPedAPlayer(npcPed)
+                       and not IsPedDeadOrDying(npcPed)
+                       and not recentMugTargets[npcPed] then
+                        local pedCoords = GetEntityCoords(npcPed)
+                        local dist = #(coords - pedCoords)
+                        if dist < closestDist then
+                            closestPed = npcPed
+                            closestDist = dist
+                        end
+                    end
+                end
+
+                if closestPed and closestDist <= maxDist then
+                    FreeGangs.Client.Activities.StartMugging(closestPed)
+                end
+            end
+
+            Wait(sleep)
+        end
+    end)
+end
+
+---Stop the mugging detection thread
+local function StopMuggingDetection()
+    muggingThreadActive = false
+    recentMugTargets = {}
 end
 
 -- ============================================================================
@@ -543,31 +626,15 @@ end
 -- OX_TARGET INTEGRATION
 -- ============================================================================
 
----Setup ox_target options for NPCs
+---Setup ox_target options for NPCs (pickpocket + drug sale only; mugging is auto-triggered)
 function FreeGangs.Client.Activities.SetupTargeting()
     if targetingEnabled then return end
-    
-    -- Add global ped targeting options
+
+    -- Start mugging proximity detection (auto-trigger on weapon approach)
+    StartMuggingDetection()
+
+    -- Add global ped targeting options (pickpocket + drug sale)
     exports.ox_target:addGlobalPed({
-        -- Mugging option
-        {
-            name = 'freegangs_mug',
-            icon = 'fa-solid fa-gun',
-            label = 'Mug',
-            canInteract = function(entity, distance, coords, name, bone)
-                if not FreeGangs.Client.PlayerGang then return false end
-                if isPerformingActivity then return false end
-                if not HasMugWeapon() then return false end
-                if IsPedAPlayer(entity) then return false end
-                if IsPedDeadOrDying(entity) then return false end
-                return true
-            end,
-            onSelect = function(data)
-                FreeGangs.Client.Activities.StartMugging(data.entity)
-            end,
-            distance = FreeGangs.Config.Activities.Mugging.MaxDistance or 5.0,
-        },
-        
         -- Pickpocketing option
         {
             name = 'freegangs_pickpocket',
@@ -629,13 +696,15 @@ end
 ---Remove targeting options
 function FreeGangs.Client.Activities.RemoveTargeting()
     if not targetingEnabled then return end
-    
+
     exports.ox_target:removeGlobalPed({
-        'freegangs_mug',
         'freegangs_pickpocket',
         'freegangs_drugsale',
     })
-    
+
+    -- Stop mugging proximity detection
+    StopMuggingDetection()
+
     targetingEnabled = false
     FreeGangs.Utils.Debug('Activity targeting disabled')
 end
