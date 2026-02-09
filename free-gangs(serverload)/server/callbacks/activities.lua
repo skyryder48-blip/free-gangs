@@ -460,6 +460,14 @@ RegisterNetEvent('freegangs:server:startGraffiti', function(coords)
     FreeGangs.Utils.Debug('Player', source, 'starting graffiti at', json.encode(coords))
 end)
 
+-- Clean up stale activity tracking on player disconnect
+AddEventHandler('playerDropped', function()
+    local source = source
+    activeMuggings[source] = nil
+    activePickpockets[source] = nil
+    activeDrugSales[source] = nil
+end)
+
 -- ============================================================================
 -- DEBUG COMMANDS
 -- ============================================================================

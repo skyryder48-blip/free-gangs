@@ -130,6 +130,48 @@ end
 -- MUGGING SYSTEM (Auto-trigger on weapon approach, distance-based cancel)
 -- ============================================================================
 
+---Check if NPC is facing toward the player (within angle threshold)
+---@param npcPed number
+---@param playerPed number
+---@param threshold number Angle in degrees
+---@return boolean
+local function IsNPCFacingPlayer(npcPed, playerPed, threshold)
+    local npcCoords = GetEntityCoords(npcPed)
+    local playerCoords = GetEntityCoords(playerPed)
+    local npcHeading = GetEntityHeading(npcPed)
+
+    local dx = playerCoords.x - npcCoords.x
+    local dy = playerCoords.y - npcCoords.y
+    local angleToPlayer = math.deg(math.atan(dx, dy)) % 360
+
+    local angleDiff = math.abs(npcHeading - angleToPlayer) % 360
+    if angleDiff > 180 then angleDiff = 360 - angleDiff end
+
+    return angleDiff <= threshold
+end
+
+---Trigger reactions from nearby witness NPCs
+---@param mugTarget number The NPC being mugged
+---@param radius number Witness reaction radius
+local function TriggerWitnessReactions(mugTarget, radius)
+    local playerPed = PlayerPedId()
+    local playerCoords = GetEntityCoords(playerPed)
+    local peds = GetGamePool('CPed')
+
+    for _, witnessPed in pairs(peds) do
+        if witnessPed ~= playerPed
+           and witnessPed ~= mugTarget
+           and not IsPedAPlayer(witnessPed)
+           and not IsPedDeadOrDying(witnessPed) then
+            local witnessCoords = GetEntityCoords(witnessPed)
+            if #(playerCoords - witnessCoords) <= radius then
+                ClearPedTasks(witnessPed)
+                TaskReactAndFleePed(witnessPed, playerPed)
+            end
+        end
+    end
+end
+
 ---Start mugging an NPC (auto-triggered by proximity detection)
 ---@param targetPed number Target NPC ped handle
 function FreeGangs.Client.Activities.StartMugging(targetPed)
@@ -152,18 +194,29 @@ function FreeGangs.Client.Activities.StartMugging(targetPed)
     -- Notify server of start (for anti-cheat tracking)
     TriggerServerEvent('freegangs:server:startMugging', targetNetId)
 
-    -- Make NPC react
-    TriggerNPCReaction(targetPed, 'hands_up')
-
     -- Face target
     local ped = FreeGangs.Client.GetPlayerPed()
     local targetCoords = GetEntityCoords(targetPed)
     TaskTurnPedToFaceCoord(ped, targetCoords.x, targetCoords.y, targetCoords.z, 1000)
+
+    -- NPC awareness: if NPC is facing away, make them turn first
+    if not IsNPCFacingPlayer(targetPed, ped, 90) then
+        TaskTurnPedToFaceEntity(targetPed, ped, 800)
+        Wait(800)
+    end
+
+    -- NPC reacts - hands up
+    TriggerNPCReaction(targetPed, 'hands_up')
+
+    -- Nearby witnesses react
+    TriggerWitnessReactions(targetPed, 15.0)
+
     Wait(500)
 
-    -- Start distance monitor thread (cancels progress if too far)
+    -- Monitor thread: cancels progress if distance breaks, weapon holstered, or target lost
     local cancelDistance = FreeGangs.Config.Activities.Mugging.CancelDistance or 8.0
     local distanceCancelled = false
+    local weaponHolstered = false
 
     CreateThread(function()
         while isPerformingActivity and currentMugTarget do
@@ -174,9 +227,13 @@ function FreeGangs.Client.Activities.StartMugging(targetPed)
             end
             local playerCoords = GetEntityCoords(FreeGangs.Client.GetPlayerPed())
             local tgtCoords = GetEntityCoords(currentMugTarget)
-            local dist = #(playerCoords - tgtCoords)
-            if dist > cancelDistance then
+            if #(playerCoords - tgtCoords) > cancelDistance then
                 distanceCancelled = true
+                lib.cancelProgress()
+                break
+            end
+            if not HasMugWeapon() then
+                weaponHolstered = true
                 lib.cancelProgress()
                 break
             end
@@ -204,7 +261,7 @@ function FreeGangs.Client.Activities.StartMugging(targetPed)
     StopAnim()
     currentMugTarget = nil
 
-    if success and not distanceCancelled then
+    if success and not distanceCancelled and not weaponHolstered then
         -- Complete mugging on server
         local mugSuccess, message, rewards = lib.callback.await('freegangs:activities:completeMugging', false, targetNetId)
 
@@ -221,6 +278,8 @@ function FreeGangs.Client.Activities.StartMugging(targetPed)
     else
         if distanceCancelled then
             FreeGangs.Bridge.Notify('Mugging cancelled - too far from target', 'warning')
+        elseif weaponHolstered then
+            FreeGangs.Bridge.Notify('Mugging cancelled - weapon holstered', 'warning')
         else
             FreeGangs.Bridge.Notify('Mugging cancelled', 'warning')
         end
@@ -244,20 +303,28 @@ local function StartMuggingDetection()
 
     CreateThread(function()
         while muggingThreadActive do
-            local sleep = 500
+            local ped = FreeGangs.Client.GetPlayerPed()
 
-            if FreeGangs.Client.PlayerGang and not isPerformingActivity and HasMugWeapon() then
-                sleep = 200
-                local ped = FreeGangs.Client.GetPlayerPed()
+            -- State gate: only do expensive NPC scan when eligible
+            if FreeGangs.Client.PlayerGang
+               and not isPerformingActivity
+               and HasMugWeapon()
+               and not IsPedInAnyVehicle(ped, false)
+               and not IsEntityDead(ped) then
+
                 local coords = GetEntityCoords(ped)
                 local maxDist = FreeGangs.Config.Activities.Mugging.MaxDistance or 5.0
                 local now = GetGameTimer()
 
-                -- Clean up expired recent targets
+                -- Clean up expired recent targets (safe: collect first, then remove)
+                local toRemove = {}
                 for targetPed, timestamp in pairs(recentMugTargets) do
                     if now - timestamp > MUG_RETRIGGER_COOLDOWN or not DoesEntityExist(targetPed) then
-                        recentMugTargets[targetPed] = nil
+                        toRemove[#toRemove + 1] = targetPed
                     end
+                end
+                for i = 1, #toRemove do
+                    recentMugTargets[toRemove[i]] = nil
                 end
 
                 -- Find closest valid NPC within range
@@ -283,7 +350,7 @@ local function StartMuggingDetection()
                 end
             end
 
-            Wait(sleep)
+            Wait(3000) -- 3 second scan interval (slight delay is realistic, saves performance)
         end
     end)
 end
