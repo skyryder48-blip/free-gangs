@@ -271,7 +271,16 @@ FreeGangs.Config.Activities = {
         
         -- Minimum time between sales to same NPC
         NPCSaleCooldown = 30, -- seconds
-        
+
+        -- Player cooldown between drug sales (short, allows rapid transactions)
+        PlayerCooldown = 15, -- seconds
+
+        -- Maximum interaction distance for drug sales
+        MaxDistance = 3.0,
+
+        -- NPC block duration after any transaction (effectively permanent per session)
+        NPCBlockDuration = 999999, -- ~11.5 days, NPC despawns well before this
+
         -- Success chance modifiers
         SuccessChance = {
             Base = 0.60, -- 60%

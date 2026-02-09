@@ -549,7 +549,13 @@ function FreeGangs.Server.Activities.SellDrug(source, targetNetId, drugItem, qua
     if not IsDrugSaleHoursActive() then
         return false, FreeGangs.L('activities', 'drug_sale_wrong_time'), nil
     end
-    
+
+    -- Check player cooldown
+    local drugCooldown = FreeGangs.Server.GetCooldownRemaining(source, 'drug_sale')
+    if drugCooldown > 0 then
+        return false, FreeGangs.L('activities', 'on_cooldown', FreeGangs.Utils.FormatDuration(drugCooldown * 1000)), nil
+    end
+
     -- Check if player has the drug
     if not FreeGangs.Bridge.HasItem(source, drugItem, quantity) then
         return false, FreeGangs.L('activities', 'drug_sale_no_product'), nil
@@ -599,12 +605,17 @@ function FreeGangs.Server.Activities.SellDrug(source, targetNetId, drugItem, qua
     
     -- Roll for sale
     if math.random(100) > saleChance then
-        SetNPCCooldown(targetNetId, 'drugSale', 60)
+        local npcBlockDuration = FreeGangs.Config.Activities.DrugSales.NPCBlockDuration or 999999
+        SetNPCCooldown(targetNetId, 'drugSale', npcBlockDuration)
         return false, FreeGangs.L('activities', 'drug_sale_fail'), { rejected = true }
     end
     
-    -- Set NPC cooldown
-    SetNPCCooldown(targetNetId, 'drugSale', FreeGangs.Config.Activities.DrugSales.NPCSaleCooldown or 300)
+    -- Set NPC permanent block (one transaction per NPC for all players)
+    local npcBlockDuration = FreeGangs.Config.Activities.DrugSales.NPCBlockDuration or 999999
+    SetNPCCooldown(targetNetId, 'drugSale', npcBlockDuration)
+
+    -- Set player cooldown (short, allows rapid transactions with different NPCs)
+    FreeGangs.Server.SetCooldown(source, 'drug_sale', FreeGangs.Config.Activities.DrugSales.PlayerCooldown or 15)
     
     -- Calculate price
     local basePrice = math.random(drugConfig.minPrice or drugConfig.basePrice * 0.8, 

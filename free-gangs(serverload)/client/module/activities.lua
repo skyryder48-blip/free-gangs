@@ -518,25 +518,32 @@ function FreeGangs.Client.Activities.StartDrugSale(targetPed)
         FreeGangs.Bridge.Notify(FreeGangs.L('errors', 'generic'), 'error')
         return
     end
-    
+
+    -- Exploit guards
+    local ped = FreeGangs.Client.GetPlayerPed()
+    if IsPedInAnyVehicle(ped, false) or IsEntityDead(ped) then return end
+
     -- Check time restriction
     if not IsDrugSaleTime() then
         FreeGangs.Bridge.Notify(FreeGangs.L('activities', 'drug_sale_wrong_time'), 'error')
         return
     end
-    
+
     -- Get player's drug inventory
     local drugInventory = lib.callback.await('freegangs:activities:getDrugInventory', false)
-    
+
     if not drugInventory or #drugInventory == 0 then
         FreeGangs.Bridge.Notify(FreeGangs.L('activities', 'drug_sale_no_product'), 'error')
         return
     end
-    
-    -- If only one drug, sell it directly
+
+    local config = FreeGangs.Config.Activities.DrugSales
+    local maxDistance = config.MaxDistance or 3.0
+
+    -- Drug selection
     local selectedDrug
     local selectedQuantity = 1
-    
+
     if #drugInventory == 1 then
         selectedDrug = drugInventory[1]
     else
@@ -552,33 +559,42 @@ function FreeGangs.Client.Activities.StartDrugSale(targetPed)
                 end,
             }
         end
-        
+
         lib.registerContext({
             id = 'freegangs_drug_select',
             title = 'Select Product',
             options = options,
         })
-        
+
         lib.showContext('freegangs_drug_select')
-        
+
         -- Wait for selection
         while lib.getOpenContextMenu() == 'freegangs_drug_select' do
             Wait(100)
         end
-        
+
         if not selectedDrug then
             return
         end
     end
 
-    -- Re-validate target NPC after menu (may have despawned or moved)
+    -- Quantity selection (if player has more than 1)
+    if selectedDrug.count > 1 then
+        local input = lib.inputDialog('Select Quantity', {
+            { type = 'number', label = 'Quantity to sell', default = 1, min = 1, max = math.min(selectedDrug.count, 10) }
+        })
+        if not input then return end
+        selectedQuantity = math.max(1, math.min(math.floor(input[1]), selectedDrug.count, 10))
+    end
+
+    -- Re-validate target NPC after menus (may have despawned or moved)
     if not DoesEntityExist(targetPed) or IsPedDeadOrDying(targetPed) then
         FreeGangs.Bridge.Notify('Target is no longer available', 'error')
         return
     end
-    local playerCoords = GetEntityCoords(FreeGangs.Client.GetPlayerPed())
+    local playerCoords = GetEntityCoords(ped)
     local targetCheckCoords = GetEntityCoords(targetPed)
-    if #(playerCoords - targetCheckCoords) > 5.0 then
+    if #(playerCoords - targetCheckCoords) > maxDistance then
         FreeGangs.Bridge.Notify(FreeGangs.L('activities', 'too_far') or 'Too far away', 'error')
         return
     end
@@ -587,16 +603,35 @@ function FreeGangs.Client.Activities.StartDrugSale(targetPed)
 
     local targetNetId = NetworkGetNetworkIdFromEntity(targetPed)
     TriggerServerEvent('freegangs:server:startDrugSale', targetNetId)
-    
+
     -- Face target
-    local ped = FreeGangs.Client.GetPlayerPed()
     local targetCoords = GetEntityCoords(targetPed)
     TaskTurnPedToFaceCoord(ped, targetCoords.x, targetCoords.y, targetCoords.z, 1000)
-    Wait(500)
-    
+
+    -- NPC turns to face player
+    if DoesEntityExist(targetPed) and not IsPedDeadOrDying(targetPed) then
+        TaskTurnPedToFaceEntity(targetPed, ped, 800)
+        Wait(800)
+    else
+        Wait(500)
+    end
+
     -- Handshake animation
     PlayAnim('mp_common', 'givetake1_a', 2000, 49)
-    
+
+    -- Monitor thread: cancel if NPC disappears or dies during progress
+    local npcGone = false
+    CreateThread(function()
+        while isPerformingActivity and not npcGone do
+            if not DoesEntityExist(targetPed) or IsPedDeadOrDying(targetPed) then
+                npcGone = true
+                lib.cancelProgress()
+                break
+            end
+            Wait(500)
+        end
+    end)
+
     local success = lib.progressBar({
         duration = 2500,
         label = 'Making the sale...',
@@ -608,33 +643,79 @@ function FreeGangs.Client.Activities.StartDrugSale(targetPed)
             combat = true,
         },
     })
-    
+
     StopAnim()
-    
-    if success then
+
+    if success and not npcGone then
         local saleSuccess, message, rewards = lib.callback.await(
-            'freegangs:activities:completeDrugSale', 
-            false, 
-            targetNetId, 
-            selectedDrug.item, 
+            'freegangs:activities:completeDrugSale',
+            false,
+            targetNetId,
+            selectedDrug.item,
             selectedQuantity
         )
-        
+
         if saleSuccess then
             FreeGangs.Bridge.Notify(message, 'success')
-            
+
             if rewards then
                 if rewards.rep and rewards.rep > 0 then
                     FreeGangs.Bridge.Notify('+' .. rewards.rep .. ' reputation', 'inform', 3000)
                 end
             end
+
+            -- NPC reaction: handshake reciprocation, then walk away
+            if DoesEntityExist(targetPed) and not IsPedDeadOrDying(targetPed) then
+                CreateThread(function()
+                    ClearPedTasks(targetPed)
+                    lib.requestAnimDict('mp_common')
+                    TaskPlayAnim(targetPed, 'mp_common', 'givetake1_b', 8.0, -8.0, 2000, 49, 0, false, false, false)
+                    Wait(2000)
+                    if DoesEntityExist(targetPed) and not IsPedDeadOrDying(targetPed) then
+                        ClearPedTasks(targetPed)
+                        TaskWanderStandard(targetPed, 10.0, 10)
+                    end
+                end)
+            end
         else
             FreeGangs.Bridge.Notify(message, 'error')
+
+            -- NPC reaction on rejection: shake head, walk away
+            if rewards and rewards.rejected and DoesEntityExist(targetPed) and not IsPedDeadOrDying(targetPed) then
+                CreateThread(function()
+                    ClearPedTasks(targetPed)
+                    lib.requestAnimDict('gestures@m@standing@casual')
+                    TaskPlayAnim(targetPed, 'gestures@m@standing@casual', 'gesture_head_no', 8.0, -8.0, 2000, 49, 0, false, false, false)
+                    Wait(2000)
+                    if DoesEntityExist(targetPed) and not IsPedDeadOrDying(targetPed) then
+                        ClearPedTasks(targetPed)
+                        TaskWanderStandard(targetPed, 10.0, 10)
+                    end
+                end)
+            end
         end
     else
-        FreeGangs.Bridge.Notify('Sale cancelled', 'warning')
+        -- Cancelled or NPC gone - notify server to clear stale tracking
+        TriggerServerEvent('freegangs:server:cancelDrugSale')
+
+        if npcGone then
+            FreeGangs.Bridge.Notify('Target is no longer available', 'error')
+        else
+            FreeGangs.Bridge.Notify('Sale cancelled', 'warning')
+
+            -- NPC walks away on player cancel
+            if DoesEntityExist(targetPed) and not IsPedDeadOrDying(targetPed) then
+                CreateThread(function()
+                    Wait(1000)
+                    if DoesEntityExist(targetPed) and not IsPedDeadOrDying(targetPed) then
+                        ClearPedTasks(targetPed)
+                        TaskWanderStandard(targetPed, 10.0, 10)
+                    end
+                end)
+            end
+        end
     end
-    
+
     SetBusy(false)
 end
 
@@ -791,7 +872,7 @@ function FreeGangs.Client.Activities.SetupTargeting()
             onSelect = function(data)
                 FreeGangs.Client.Activities.StartDrugSale(data.entity)
             end,
-            distance = 3.0,
+            distance = FreeGangs.Config.Activities.DrugSales.MaxDistance or 3.0,
         },
     })
     

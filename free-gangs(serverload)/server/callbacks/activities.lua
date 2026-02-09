@@ -196,6 +196,7 @@ lib.callback.register('freegangs:activities:completeDrugSale', function(source, 
     -- Validate that drug sale was started via server event
     local tracking = activeDrugSales[source]
     if not tracking then return false, 'No active drug sale' end
+    if tracking.targetNetId ~= targetNetId then return false, 'Target mismatch' end
 
     -- Validate minimum time (progress bar is 2.5 seconds)
     local elapsed = os.time() - tracking.startTime
@@ -251,22 +252,6 @@ lib.callback.register('freegangs:activities:getDrugInventory', function(source)
     end
 
     return drugItems
-end)
-
----Validate drug sale (check time, have product, etc.)
-lib.callback.register('freegangs:activities:validateDrugSale', function(source, drugItem, quantity)
-    local citizenid = FreeGangs.Bridge.GetCitizenId(source)
-    if not citizenid then return false, 'Not loaded' end
-    
-    local gangData = FreeGangs.Server.GetPlayerGangData(source)
-    if not gangData then return false, 'Not in gang' end
-    
-    -- Check if player has the drug
-    if not FreeGangs.Bridge.HasItem(source, drugItem, quantity or 1) then
-        return false, FreeGangs.L('activities', 'drug_sale_no_product')
-    end
-    
-    return true
 end)
 
 -- ============================================================================
@@ -450,6 +435,13 @@ RegisterNetEvent('freegangs:server:startDrugSale', function(targetNetId)
         activeDrugSales[source] = { targetNetId = targetNetId, startTime = os.time() }
     end
     FreeGangs.Utils.Debug('Player', source, 'starting drug sale to', targetNetId)
+end)
+
+-- Handle drug sale cancel (clear stale tracking)
+RegisterNetEvent('freegangs:server:cancelDrugSale', function()
+    local source = source
+    activeDrugSales[source] = nil
+    FreeGangs.Utils.Debug('Player', source, 'cancelled drug sale')
 end)
 
 -- Handle graffiti start
