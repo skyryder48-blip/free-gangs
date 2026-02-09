@@ -239,7 +239,7 @@ function FreeGangs.Server.Territory.AddInfluence(zoneName, gangName, amount, rea
 
             if rivalInfluence >= 25 and not contestedAlerts[alertKey] then
                 contestedAlerts[alertKey] = true
-                local ownerMembers = FreeGangs.Server.Members.GetOnlineMembers(ownerGang)
+                local ownerMembers = FreeGangs.Server.Member.GetOnlineMembers(ownerGang)
                 for _, memberSource in pairs(ownerMembers) do
                     TriggerClientEvent(FreeGangs.Events.Client.TERRITORY_ALERT, memberSource, zoneName, 'contested', {
                         rivalGang = gangName,
@@ -585,14 +585,14 @@ function FreeGangs.Server.Territory.ProcessCapture(zoneName, oldOwner, newOwner)
     -- Award capture bonus to new owner
     local capturePoints = FreeGangs.ActivityPoints[FreeGangs.Activities.ZONE_CAPTURE]
     if capturePoints then
-        FreeGangs.Server.Reputation.AddMasterRep(newOwner, capturePoints.masterRep, 'zone_capture')
+        FreeGangs.Server.Reputation.Add(newOwner, capturePoints.masterRep, 'zone_capture')
     end
     
     -- Penalize old owner
     if oldOwner then
         local lossPoints = FreeGangs.ActivityPoints[FreeGangs.Activities.ZONE_LOST]
         if lossPoints then
-            FreeGangs.Server.Reputation.RemoveMasterRep(oldOwner, math.abs(lossPoints.masterRep), 'zone_lost')
+            FreeGangs.Server.Reputation.Remove(oldOwner, math.abs(lossPoints.masterRep), 'zone_lost')
         end
         
         -- Notify old owner's gang
@@ -601,7 +601,7 @@ function FreeGangs.Server.Territory.ProcessCapture(zoneName, oldOwner, newOwner)
             'error')
         
         -- Trigger territory alert for old owner
-        local oldOwnerMembers = FreeGangs.Server.Members.GetOnlineMembers(oldOwner)
+        local oldOwnerMembers = FreeGangs.Server.Member.GetOnlineMembers(oldOwner)
         for _, source in pairs(oldOwnerMembers) do
             TriggerClientEvent(FreeGangs.Events.Client.TERRITORY_ALERT, source, zoneName, 'lost', {
                 newOwner = newOwner,
@@ -615,7 +615,7 @@ function FreeGangs.Server.Territory.ProcessCapture(zoneName, oldOwner, newOwner)
         'success')
     
     -- Trigger territory alert for new owner
-    local newOwnerMembers = FreeGangs.Server.Members.GetOnlineMembers(newOwner)
+    local newOwnerMembers = FreeGangs.Server.Member.GetOnlineMembers(newOwner)
     for _, source in pairs(newOwnerMembers) do
         TriggerClientEvent(FreeGangs.Events.Client.TERRITORY_ALERT, source, zoneName, 'captured', {})
     end
