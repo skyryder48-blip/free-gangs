@@ -106,10 +106,11 @@ lib.callback.register('freegangs:activities:completeMugging', function(source, t
     local elapsed = os.time() - tracking.startTime
     if elapsed < 2 then return false, 'Too fast' end
 
+    local npcCategory = tracking.npcCategory
     -- Clear tracking
     activeMuggings[source] = nil
 
-    return FreeGangs.Server.Activities.Mug(source, targetNetId)
+    return FreeGangs.Server.Activities.Mug(source, targetNetId, npcCategory)
 end)
 
 ---Validate mugging target
@@ -441,10 +442,15 @@ end)
 -- ============================================================================
 
 -- Handle mugging start (track for completion validation)
-RegisterNetEvent('freegangs:server:startMugging', function(targetNetId)
+RegisterNetEvent('freegangs:server:startMugging', function(targetNetId, npcCategory)
     local source = source
     if type(targetNetId) == 'number' then
-        activeMuggings[source] = { targetNetId = targetNetId, startTime = os.time() }
+        -- Sanitize npcCategory (only allow known categories)
+        local validCategories = { armed = true, gang = true, wealthy = true }
+        if npcCategory and not validCategories[npcCategory] then
+            npcCategory = nil
+        end
+        activeMuggings[source] = { targetNetId = targetNetId, startTime = os.time(), npcCategory = npcCategory }
     end
     FreeGangs.Utils.Debug('Player', source, 'starting mugging on', targetNetId)
 end)

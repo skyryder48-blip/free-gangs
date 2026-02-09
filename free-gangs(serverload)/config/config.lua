@@ -149,7 +149,7 @@ FreeGangs.Config.Heat = {
     -- Heat point values (override enums if needed)
     Points = {
         DrugSale = 1,
-        Mugging = 22,
+        Mugging = 10,
         Pickpocket = 0, -- 10 on failure
         PickpocketFail = 10,
         Graffiti = 5,
@@ -211,22 +211,22 @@ FreeGangs.Config.Activities = {
     Mugging = {
         -- Cooldown between muggings (in seconds)
         PlayerCooldown = 300, -- 5 minutes
-        
-        -- Loot ranges
+
+        -- Loot ranges (standard NPCs)
         MinCash = 1,
         MaxCash = 200,
-        
-        -- Loot table (items that can be dropped)
+
+        -- Loot table (items that can be dropped from standard NPCs)
         LootTable = {
             { item = 'phone', chance = 15, min = 1, max = 1 },
             { item = 'wallet', chance = 25, min = 1, max = 1 },
             { item = 'rolex', chance = 5, min = 1, max = 1 },
             { item = 'goldchain', chance = 8, min = 1, max = 1 },
         },
-        
+
         -- Required weapon types (must have one equipped)
         RequiredWeapons = { 'pistol', 'smg' },
-        
+
         -- Maximum distance to target NPC (auto-trigger range)
         MaxDistance = 5.0,
 
@@ -235,6 +235,127 @@ FreeGangs.Config.Activities = {
 
         -- NPC cooldown after being mugged (in seconds)
         NPCCooldown = 86400, -- 24 hours
+
+        -- ================================================================
+        -- NPC RESISTANCE SYSTEM
+        -- ================================================================
+        -- NPCs can fight back based on their ped model category.
+        -- Higher risk NPCs drop better loot but may attack the player.
+
+        Resistance = {
+            -- Enable/disable resistance system
+            Enabled = true,
+
+            -- Base resistance chance for standard civilian NPCs (0-100)
+            BaseResistChance = 5,
+
+            -- Duration of NPC fight-back combat (ms) before they flee
+            FightBackDuration = 8000,
+
+            -- Categories: each has a resist chance, cash multiplier, and a loot table override
+            Categories = {
+                -- Armed civilian NPCs (security guards, bikers, etc.)
+                armed = {
+                    resistChance = 60, -- 60% chance to fight back
+                    cashMultiplier = 2.0, -- 2x cash on success
+                    lootTable = {
+                        { item = 'phone', chance = 20, min = 1, max = 1 },
+                        { item = 'wallet', chance = 30, min = 1, max = 1 },
+                        { item = 'rolex', chance = 12, min = 1, max = 1 },
+                        { item = 'goldchain', chance = 15, min = 1, max = 1 },
+                    },
+                },
+                -- Gang member NPCs
+                gang = {
+                    resistChance = 75, -- 75% chance to fight back
+                    cashMultiplier = 2.5, -- 2.5x cash on success
+                    lootTable = {
+                        { item = 'phone', chance = 15, min = 1, max = 1 },
+                        { item = 'wallet', chance = 35, min = 1, max = 1 },
+                        { item = 'rolex', chance = 8, min = 1, max = 1 },
+                        { item = 'goldchain', chance = 20, min = 1, max = 1 },
+                        { item = 'lockpick', chance = 10, min = 1, max = 1 },
+                    },
+                },
+                -- Wealthy/business NPCs (suits, downtown pedestrians)
+                wealthy = {
+                    resistChance = 15, -- Low fight-back chance
+                    cashMultiplier = 3.0, -- 3x cash on success
+                    lootTable = {
+                        { item = 'phone', chance = 30, min = 1, max = 1 },
+                        { item = 'wallet', chance = 40, min = 1, max = 1 },
+                        { item = 'rolex', chance = 20, min = 1, max = 1 },
+                        { item = 'goldchain', chance = 25, min = 1, max = 1 },
+                    },
+                },
+            },
+
+            -- Ped models classified as "armed" (security guards, bouncers, bikers)
+            ArmedPedModels = {
+                's_m_m_security_01',
+                's_m_m_bouncer_01',
+                's_m_m_armoured_01',
+                's_m_m_armoured_02',
+                'g_m_y_lost_01',
+                'g_m_y_lost_02',
+                'g_m_y_lost_03',
+                's_m_y_ranger_01',
+                'a_m_m_hillbilly_01',
+                'a_m_m_hillbilly_02',
+            },
+
+            -- Ped models classified as "gang" (street gangs, bikers, dealers)
+            GangPedModels = {
+                'g_m_y_famca_01',
+                'g_f_y_families_01',
+                'g_m_y_famdnf_01',
+                'g_m_y_famfor_01',
+                'g_m_y_ballaorig_01',
+                'g_m_y_ballasout_01',
+                'g_m_y_ballaeast_01',
+                'g_m_y_salvaboss_01',
+                'g_m_y_salvagoon_01',
+                'g_m_y_salvagoon_02',
+                'g_m_y_salvagoon_03',
+                'g_m_y_mexgoon_01',
+                'g_m_y_mexgoon_02',
+                'g_m_y_mexgoon_03',
+                'g_m_y_strpunk_01',
+                'g_m_y_strpunk_02',
+                'g_m_y_korean_01',
+                'g_m_y_korean_02',
+                'g_m_y_korlieut_01',
+                'g_m_m_chicold_01',
+                'g_m_m_chigoon_01',
+                'g_m_m_chigoon_02',
+            },
+
+            -- Ped models classified as "wealthy" (business people, rich NPCs)
+            WealthyPedModels = {
+                'a_m_y_business_01',
+                'a_m_y_business_02',
+                'a_m_y_business_03',
+                'a_f_y_business_01',
+                'a_f_y_business_02',
+                'a_f_y_business_03',
+                'a_f_y_business_04',
+                'a_m_m_business_01',
+                'a_f_m_business_02',
+                'a_m_y_bevhills_01',
+                'a_m_y_bevhills_02',
+                'a_f_y_bevhills_01',
+                'a_f_y_bevhills_02',
+                'a_f_y_bevhills_03',
+                'a_f_y_bevhills_04',
+                'a_m_m_bevhills_01',
+                'a_m_m_bevhills_02',
+                'a_f_m_bevhills_01',
+                'a_f_m_bevhills_02',
+                'u_m_y_downtown_01',
+                'a_m_y_vinewood_01',
+                'a_f_y_vinewood_01',
+            },
+        },
     },
     
     -- Pickpocketing
@@ -259,8 +380,45 @@ FreeGangs.Config.Activities = {
         NPCCooldown = 1800, -- 30 minutes
 
         -- Per-roll NPC detection chance (escalates each roll)
+        -- NOTE: When SkillCheck is enabled, these are used as fallback only
         DetectionChanceBase = 10, -- 10% on first roll
         DetectionChancePerRoll = 10, -- +10% per subsequent roll (roll 2 = 20%, roll 3 = 30%)
+
+        -- ================================================================
+        -- SKILL CHECK MINI-GAME (replaces pure RNG detection)
+        -- ================================================================
+        -- Uses ox_lib's lib.skillCheck for player-agency-based detection.
+        -- Failing the skill check = detected by NPC. Passing = safe roll.
+
+        SkillCheck = {
+            -- Enable/disable skill check (falls back to RNG detection if false)
+            Enabled = true,
+
+            -- Difficulty per roll (ox_lib skillCheck difficulty strings)
+            -- Options: 'easy', 'medium', 'hard'
+            -- Escalates per roll for increasing tension
+            DifficultyPerRoll = {
+                [1] = 'easy',    -- Roll 1: easy
+                [2] = 'medium',  -- Roll 2: medium
+                [3] = 'hard',    -- Roll 3: hard
+            },
+
+            -- Speed multiplier per roll (higher = faster, harder)
+            -- 1.0 = normal speed, 1.5 = 50% faster, etc.
+            SpeedPerRoll = {
+                [1] = 1.0,  -- Normal speed
+                [2] = 1.2,  -- 20% faster
+                [3] = 1.5,  -- 50% faster
+            },
+
+            -- Number of skill check inputs per roll
+            -- More inputs = harder to complete without mistake
+            InputsPerRoll = {
+                [1] = 1,  -- Single input
+                [2] = 2,  -- Two inputs
+                [3] = 3,  -- Three inputs
+            },
+        },
     },
     
     -- Drug Sales
@@ -358,6 +516,55 @@ FreeGangs.Config.Activities = {
 
         -- Wanted level applied when trying to sell to a blacklisted ped
         BlacklistedPedWantedLevel = 2,
+
+        -- ================================================================
+        -- DYNAMIC DRUG MARKET (supply & demand pricing)
+        -- ================================================================
+        -- Tracks global sale volume per zone per drug type.
+        -- Prices adjust based on supply saturation in each zone.
+
+        DynamicMarket = {
+            -- Enable/disable dynamic market pricing
+            Enabled = true,
+
+            -- Time window for tracking sales volume (seconds)
+            -- Sales within this window count toward saturation
+            TrackingWindow = 3600, -- 1 hour
+
+            -- Sales threshold per zone per drug before prices start dropping
+            -- Below this = normal prices. Above = supply penalty kicks in.
+            SaturationThreshold = 15,
+
+            -- Price reduction per sale above threshold (percentage)
+            -- e.g. 0.03 = -3% per excess sale
+            SupplyPenaltyRate = 0.03,
+
+            -- Minimum price multiplier from oversupply (floor)
+            MinSupplyMultiplier = 0.50, -- Prices can drop to 50% at most
+
+            -- Bonus for underserved zones (no sales in tracking window)
+            -- Applied as a price multiplier when a zone has 0 recent sales of this drug
+            UndersupplyBonus = 1.25, -- +25% price in virgin zones
+
+            -- Drug drought events (server-controlled temporary price spikes)
+            Drought = {
+                -- Enable random drought events
+                Enabled = true,
+
+                -- Chance per hour that a drought event triggers (0-100)
+                ChancePerHour = 8, -- 8% chance per hour
+
+                -- Duration of drought event (seconds)
+                MinDuration = 1800, -- 30 minutes
+                MaxDuration = 5400, -- 90 minutes
+
+                -- Price multiplier during drought for the affected drug
+                PriceMultiplier = 2.0, -- 2x price
+
+                -- Maximum simultaneous droughts
+                MaxActive = 1,
+            },
+        },
     },
     
     -- Graffiti

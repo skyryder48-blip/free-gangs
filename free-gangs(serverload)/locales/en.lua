@@ -207,19 +207,25 @@ FreeGangs.Locale.en = {
         -- Mugging
         mugging_success = 'Mugging successful! Got %s',
         mugging_fail = 'Mugging failed!',
+        mugging_resisted = 'The target fought back!',
+        mugging_resist_armed = 'This one\'s armed - be careful!',
+        mugging_resist_gang = 'They\'re in a gang - watch yourself!',
         mugging_no_weapon = 'You need a weapon to mug someone',
         
         -- Pickpocketing
         pickpocket_success = 'Pickpocket successful!',
         pickpocket_fail = 'Pickpocket failed! You\'ve been spotted!',
         pickpocket_detected = 'The target noticed you!',
-        
+        pickpocket_skillcheck = 'Carefully extract the goods...',
+
         -- Drug Sales
         drug_sale_success = 'Sold %s for %s',
         drug_sale_fail = 'Customer rejected the deal',
         drug_sale_no_product = 'You don\'t have any product to sell',
         drug_sale_wrong_time = 'Corner sales only between 4 PM and 7 AM',
-        
+        drug_drought_notice = '%s is in high demand right now!',
+        drug_market_saturated = 'The market is flooded here...',
+
         -- Graffiti
         graffiti_sprayed = 'Tag sprayed! +%d zone influence',
         graffiti_removed = 'Rival tag removed!',
