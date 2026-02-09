@@ -14,6 +14,7 @@ local dirtyTerritories = {}
 local dirtyHeat = {}
 local dirtyBribes = {}
 local dirtyProtection = {}
+local dirtyPrison = {}
 
 -- Last flush timestamp
 local lastFlush = 0
@@ -36,6 +37,8 @@ function FreeGangs.Server.Cache.MarkDirty(entityType, key)
         dirtyBribes[key] = true
     elseif entityType == 'protection' then
         dirtyProtection[key] = true
+    elseif entityType == 'prison_influence' then
+        dirtyPrison[key] = true
     end
 end
 
@@ -54,6 +57,8 @@ function FreeGangs.Server.Cache.IsDirty(entityType, key)
         return dirtyBribes[key] == true
     elseif entityType == 'protection' then
         return dirtyProtection[key] == true
+    elseif entityType == 'prison_influence' then
+        return dirtyPrison[key] == true
     end
     return false
 end
@@ -123,8 +128,8 @@ local function FlushTerritories()
                 ]],
                 {
                     json.encode(territory.influence or {}),
-                    territory.last_flip,
-                    territory.cooldown_until,
+                    territory.lastFlip,
+                    territory.cooldownUntil,
                     zoneName
                 }
             }
@@ -240,6 +245,28 @@ local function FlushBribes()
     return count
 end
 
+---Flush all dirty prison influence data to database
+local function FlushPrison()
+    if not next(dirtyPrison) then return 0 end
+
+    local count = 0
+    for gangName, _ in pairs(dirtyPrison) do
+        local prisonData = FreeGangs.Server.Prison and FreeGangs.Server.Prison.GetControlLevel and FreeGangs.Server.Prison.GetControlLevel(gangName)
+        if prisonData then
+            local query = [[
+                INSERT INTO freegangs_prison_influence (gang_name, influence, last_updated)
+                VALUES (?, ?, NOW())
+                ON DUPLICATE KEY UPDATE influence = VALUES(influence), last_updated = NOW()
+            ]]
+            MySQL.update.await(query, { gangName, prisonData })
+            count = count + 1
+        end
+    end
+
+    dirtyPrison = {}
+    return count
+end
+
 ---Main flush function - flushes all dirty data
 ---@param force boolean|nil Force immediate synchronous flush
 function FreeGangs.Server.Cache.Flush(force)
@@ -257,7 +284,8 @@ function FreeGangs.Server.Cache.Flush(force)
     totalFlushed = totalFlushed + FlushTerritories()
     totalFlushed = totalFlushed + FlushHeat()
     totalFlushed = totalFlushed + FlushBribes()
-    
+    totalFlushed = totalFlushed + FlushPrison()
+
     if totalFlushed > 0 then
         FreeGangs.Utils.Debug('Cache flush complete: ' .. totalFlushed .. ' total records')
     end
@@ -377,8 +405,8 @@ function FreeGangs.Server.Cache.SetTerritoryCooldown(zoneName, cooldownUntil)
     local territory = FreeGangs.Server.Territories[zoneName]
     if not territory then return end
     
-    territory.cooldown_until = cooldownUntil
-    territory.last_flip = os.time()
+    territory.cooldownUntil = cooldownUntil
+    territory.lastFlip = os.time()
     
     FreeGangs.Server.Cache.MarkDirty('territory', zoneName)
 end

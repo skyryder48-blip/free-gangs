@@ -62,7 +62,8 @@ server_scripts {
     'server/callbacks/activities.lua',
     'server/callbacks/bribes.lua',
     'server/callbacks/archetypes.lua',
-    
+    'server/callbacks/prison.lua',
+
     -- Exports and initialization (last)
     'server/exports.lua',
     'server/main.lua',
@@ -84,7 +85,8 @@ client_scripts {
     'client/module/graffiti.lua',
     'client/module/bribes.lua',
     'client/module/archetypes.lua',
-    
+    'client/module/prison.lua',
+
     -- UI components
     'client/ui/menus.lua',
     'client/ui/inputs.lua',

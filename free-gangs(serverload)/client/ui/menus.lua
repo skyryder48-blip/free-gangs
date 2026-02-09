@@ -58,6 +58,20 @@ function FreeGangs.Client.UI.OpenMainMenu()
                 FreeGangs.Client.UI.OpenTerritoryMap()
             end,
         },
+        -- Prison Operations
+        {
+            title = 'Prison Operations',
+            icon = 'building-shield',
+            iconColor = FreeGangs.Config.UI and FreeGangs.Config.UI.Theme and FreeGangs.Config.UI.Theme.AccentColor or '#e74c3c',
+            description = 'Manage prison control and operations',
+            onSelect = function()
+                if FreeGangs.Client.Prison and FreeGangs.Client.Prison.OpenMenu then
+                    FreeGangs.Client.Prison.OpenMenu()
+                else
+                    lib.notify({ title = 'Error', description = 'Prison module not available', type = 'error' })
+                end
+            end,
+        },
         {
             title = FreeGangs.L('menu', 'reputation'),
             description = string.format('Level %d - %s', gangData.master_level or 1, 
@@ -271,7 +285,23 @@ function FreeGangs.Client.UI.OpenDashboard()
             },
         },
     }
-    
+
+    -- Prison control info
+    local prisonControl = lib.callback.await('free-gangs:callback:getPrisonControl', false) or 0
+    if prisonControl > 0 then
+        table.insert(options, {
+            title = 'Prison Control',
+            icon = 'building-shield',
+            iconColor = prisonControl >= 51 and '#27ae60' or '#e67e22',
+            progress = prisonControl,
+            colorScheme = prisonControl >= 51 and 'green' or 'orange',
+            metadata = {
+                { label = 'Control', value = math.floor(prisonControl) .. '%' },
+                { label = 'Status', value = prisonControl >= 51 and 'Controlled' or 'Contested' },
+            },
+        })
+    end
+
     -- Add unlocks info
     if levelInfo.unlocks and #levelInfo.unlocks > 0 then
         table.insert(options, {
@@ -460,7 +490,7 @@ function FreeGangs.Client.UI.OpenTerritoryMap()
         if isOwned then ownedCount = ownedCount + 1 end
         if isContested then contestedCount = contestedCount + 1 end
         
-        local zoneTypeInfo = FreeGangs.ZoneTypeInfo[territory.zone_type] or { label = 'Unknown', icon = 'map-marker' }
+        local zoneTypeInfo = FreeGangs.ZoneTypeInfo[territory.zoneType] or { label = 'Unknown', icon = 'map-marker' }
         local statusColor = isOwned and '#00FF00' or (isContested and '#FFAA00' or '#888888')
         
         local metadata = {
@@ -565,8 +595,8 @@ function FreeGangs.Client.UI.ShowTerritoryDetails(zoneName, territory)
     })
     
     -- Cooldown status
-    if territory.cooldown_until and territory.cooldown_until > FreeGangs.Utils.GetTimestamp() then
-        local remaining = territory.cooldown_until - FreeGangs.Utils.GetTimestamp()
+    if territory.cooldownUntil and territory.cooldownUntil > FreeGangs.Utils.GetTimestamp() then
+        local remaining = territory.cooldownUntil - FreeGangs.Utils.GetTimestamp()
         table.insert(options, {
             title = 'Capture Cooldown',
             icon = 'clock',

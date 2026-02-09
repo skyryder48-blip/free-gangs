@@ -55,6 +55,31 @@ if isServer then
         return 'Unknown'
     end
     
+    ---Get player's name by citizenid (checks online players first, then database)
+    ---@param citizenid string
+    ---@return string
+    function FreeGangs.Bridge.GetPlayerNameByCitizenId(citizenid)
+        -- Try to find online player first
+        local players = exports.qbx_core:GetQBPlayers()
+        if players then
+            for _, player in pairs(players) do
+                if player and player.PlayerData and player.PlayerData.citizenid == citizenid then
+                    return player.PlayerData.charinfo.firstname .. ' ' .. player.PlayerData.charinfo.lastname
+                end
+            end
+        end
+        -- Fallback: query database
+        local result = MySQL.scalar.await('SELECT JSON_EXTRACT(charinfo, "$.firstname") FROM players WHERE citizenid = ?', { citizenid })
+        if result then
+            local lastname = MySQL.scalar.await('SELECT JSON_EXTRACT(charinfo, "$.lastname") FROM players WHERE citizenid = ?', { citizenid })
+            -- JSON_EXTRACT returns quoted strings, strip quotes
+            result = result:gsub('"', '')
+            lastname = lastname and lastname:gsub('"', '') or ''
+            return result .. ' ' .. lastname
+        end
+        return 'Unknown'
+    end
+
     ---Check if player is loaded
     ---@param source number
     ---@return boolean
@@ -467,6 +492,21 @@ else
         return exports.qbx_core:GetGroups()
     end
     
+    -- ========================================================================
+    -- MONEY (Client-side)
+    -- ========================================================================
+
+    ---Get local player's money
+    ---@param _ any Unused (server compat signature)
+    ---@param moneyType string|nil
+    ---@return number
+    function FreeGangs.Bridge.GetMoney(_, moneyType)
+        local playerData = FreeGangs.Bridge.GetPlayerData()
+        if not playerData then return 0 end
+        moneyType = moneyType or 'cash'
+        return playerData.money and playerData.money[moneyType] or 0
+    end
+
     -- ========================================================================
     -- INVENTORY (Client-side)
     -- ========================================================================

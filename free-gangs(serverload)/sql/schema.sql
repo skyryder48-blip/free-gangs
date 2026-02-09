@@ -348,3 +348,31 @@ CREATE TABLE IF NOT EXISTS `freegangs_crime_stats` (
 CREATE INDEX IF NOT EXISTS `idx_member_activity` ON `freegangs_members` (`gang_name`, `last_active` DESC);
 CREATE INDEX IF NOT EXISTS `idx_territory_influence` ON `freegangs_territories` (`zone_type`, `id`);
 CREATE INDEX IF NOT EXISTS `idx_log_cleanup` ON `freegangs_logs` (`created_at`);
+
+-- ============================================================================
+-- PRISON INFLUENCE (Gang influence within prison zone)
+-- ============================================================================
+
+CREATE TABLE IF NOT EXISTS `freegangs_prison_influence` (
+    `gang_name` VARCHAR(50) PRIMARY KEY,
+    `influence` TINYINT UNSIGNED DEFAULT 0,
+    `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    CONSTRAINT `fk_prison_gang` FOREIGN KEY (`gang_name`)
+        REFERENCES `freegangs_gangs`(`name`) ON DELETE CASCADE ON UPDATE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ============================================================================
+-- JAILED MEMBERS (Track gang members currently in prison)
+-- ============================================================================
+
+CREATE TABLE IF NOT EXISTS `freegangs_jailed_members` (
+    `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    `citizenid` VARCHAR(50) NOT NULL,
+    `gang_name` VARCHAR(50) NOT NULL,
+    `jailed_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    `released_at` TIMESTAMP NULL,
+    INDEX `idx_gang` (`gang_name`),
+    INDEX `idx_citizenid` (`citizenid`),
+    CONSTRAINT `fk_jailed_gang` FOREIGN KEY (`gang_name`)
+        REFERENCES `freegangs_gangs`(`name`) ON DELETE CASCADE ON UPDATE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

@@ -23,6 +23,11 @@ lib.callback.register(FreeGangs.Callbacks.GET_PLAYER_GANG, function(source)
     local gangData = FreeGangs.Server.Gangs[membership.gang_name]
     if not gangData then return nil end
 
+    -- Derive boss/officer status from rank (rank 5 = boss, rank >= 2 = officer)
+    local rank = membership.rank or 0
+    local isBoss = rank == 5
+    local isOfficer = rank >= 2
+
     -- Include membership data
     return {
         name = gangData.name,
@@ -35,12 +40,12 @@ lib.callback.register(FreeGangs.Callbacks.GET_PLAYER_GANG, function(source)
         war_chest = gangData.war_chest,
         membership = {
             citizenid = membership.citizenid,
-            rank = membership.rank,
+            rank = rank,
             rankName = membership.rank_name,
-            isBoss = membership.is_boss,
-            isOfficer = membership.is_officer,
+            isBoss = isBoss,
+            isOfficer = isOfficer,
             permissions = membership.permissions,
-            individual_rep = membership.individual_rep,
+            individual_rep = membership.personal_rep or 0,
             joined_at = membership.joined_at,
         },
     }

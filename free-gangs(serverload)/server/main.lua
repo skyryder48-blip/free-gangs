@@ -62,13 +62,16 @@ function FreeGangs.Server.LoadAllData()
     end
     FreeGangs.Utils.Log('Loaded ' .. FreeGangs.Utils.TableLength(FreeGangs.Server.Gangs) .. ' gangs')
     
-    -- Load territories
-    local territories = FreeGangs.Server.DB.GetAllTerritories()
-    for _, territory in pairs(territories) do
-        FreeGangs.Server.Territories[territory.name] = territory
+    -- Initialize territory system (syncs config with DB, sets up GlobalState, starts presence thread)
+    FreeGangs.Server.Territory.Initialize()
+    FreeGangs.Utils.Log('Initialized ' .. FreeGangs.Utils.TableLength(FreeGangs.Server.Territories) .. ' territories')
+
+    -- Initialize prison system
+    if FreeGangs.Server.Prison and FreeGangs.Server.Prison.Initialize then
+        FreeGangs.Server.Prison.Initialize()
+        FreeGangs.Utils.Log('Initialized prison system')
     end
-    FreeGangs.Utils.Log('Loaded ' .. FreeGangs.Utils.TableLength(FreeGangs.Server.Territories) .. ' territories')
-    
+
     -- Load heat data
     local heatData = FreeGangs.Server.DB.GetAllHeat()
     for _, heat in pairs(heatData) do
@@ -140,12 +143,12 @@ function FreeGangs.Server.StartBackgroundTasks()
         end
     end)
     
-    -- Territory influence decay task
+    -- Territory influence decay task (uses module's richer decay with zone type modifiers and neighbor bonuses)
     CreateThread(function()
         local decayInterval = FreeGangs.Config.Territory.DecayIntervalHours * 60 * 60 * 1000
         while true do
             Wait(decayInterval)
-            FreeGangs.Server.ProcessTerritoryDecay()
+            FreeGangs.Server.Territory.ProcessDecay()
         end
     end)
     
@@ -158,6 +161,17 @@ function FreeGangs.Server.StartBackgroundTasks()
         end
     end)
     
+    -- Prison influence decay task
+    CreateThread(function()
+        local prisonDecayInterval = (FreeGangs.Config.Prison.DecayIntervalHours or 1) * 60 * 60 * 1000
+        while true do
+            Wait(prisonDecayInterval)
+            if FreeGangs.Server.Prison and FreeGangs.Server.Prison.ProcessDecay then
+                FreeGangs.Server.Prison.ProcessDecay()
+            end
+        end
+    end)
+
     -- Bribe payment check task
     CreateThread(function()
         while true do
@@ -207,30 +221,6 @@ function FreeGangs.Server.ProcessReputationDecay()
     end
     
     FreeGangs.Utils.Debug('Processed reputation decay for all gangs')
-end
-
----Process territory influence decay
-function FreeGangs.Server.ProcessTerritoryDecay()
-    local decayPercent = FreeGangs.Config.Territory.DecayPercentage
-    
-    for zoneName, territory in pairs(FreeGangs.Server.Territories) do
-        local influence = territory.influence or {}
-        local changed = false
-        
-        for gangName, percent in pairs(influence) do
-            local newPercent = math.max(0, percent - decayPercent)
-            if newPercent ~= percent then
-                influence[gangName] = newPercent > 0 and newPercent or nil
-                changed = true
-            end
-        end
-        
-        if changed then
-            FreeGangs.Server.UpdateTerritoryInfluence(zoneName, influence)
-        end
-    end
-    
-    FreeGangs.Utils.Debug('Processed territory decay')
 end
 
 ---Process heat decay between gangs
@@ -574,6 +564,13 @@ AddEventHandler('onResourceStop', function(resourceName)
     if resourceName ~= GetCurrentResourceName() then return end
     
     FreeGangs.Utils.Log('Resource stopping, flushing cache...')
+
+    -- Save prison data before cache flush
+    if FreeGangs.Server.Prison and FreeGangs.Server.Prison.SaveToDatabase then
+        FreeGangs.Server.Prison.SaveToDatabase()
+        FreeGangs.Utils.Log('Saved prison data to database')
+    end
+
     FreeGangs.Server.Cache.Flush(true) -- Force immediate flush
 end)
 
@@ -995,6 +992,21 @@ RegisterNetEvent('free-gangs:server:terminateBribe', function(contactType)
     end
 end)
 
+-- Update territory influence from client activity
+RegisterNetEvent(FreeGangs.Events.Server.UPDATE_INFLUENCE, function(zoneName, amount, reason)
+    local source = source
+    local citizenid = FreeGangs.Bridge.GetCitizenId(source)
+    if not citizenid then return end
+
+    local membership = FreeGangs.Server.DB.GetPlayerMembership(citizenid)
+    if not membership then return end
+
+    -- Validate amount is reasonable (prevent exploits)
+    if type(amount) ~= 'number' or amount <= 0 or amount > 50 then return end
+
+    FreeGangs.Server.Territory.AddInfluence(zoneName, membership.gang_name, amount, reason or 'client_activity')
+end)
+
 -- Set main corner (Street Gang archetype)
 RegisterNetEvent('free-gangs:server:setMainCorner', function(zoneName)
     local source = source
@@ -1040,6 +1052,35 @@ if FreeGangs.Config.General.Debug then
         end
     end, false)
     
+    -- Add reputation to a gang
+    RegisterCommand('fg_addrep', function(source, args)
+        if source ~= 0 and not IsPlayerAceAllowed(source, FreeGangs.Config.Admin.AcePermission) then
+            FreeGangs.Bridge.Notify(source, 'No permission', 'error')
+            return
+        end
+
+        local gangName = args[1]
+        local amount = tonumber(args[2])
+
+        if not gangName or not amount then
+            local msg = 'Usage: /fg_addrep [gangname] [amount]'
+            if source == 0 then print(msg) else FreeGangs.Bridge.Notify(source, msg, 'error') end
+            return
+        end
+
+        local gang = FreeGangs.Server.Gangs[gangName]
+        if not gang then
+            local msg = 'Gang not found: ' .. gangName
+            if source == 0 then print(msg) else FreeGangs.Bridge.Notify(source, msg, 'error') end
+            return
+        end
+
+        local actual = FreeGangs.Server.Reputation.Add(gangName, amount, 'admin_command', source ~= 0 and source or nil)
+        local msg = string.format('Added %d rep to %s (actual: %d, new total: %d, level: %d)',
+            amount, gangName, actual, gang.master_rep, gang.master_level)
+        if source == 0 then print('[free-gangs] ' .. msg) else FreeGangs.Bridge.Notify(source, msg, 'success') end
+    end, false)
+
     -- Debug command to check territories
     RegisterCommand('fg_territories', function(source, args)
         if source ~= 0 and not IsPlayerAceAllowed(source, FreeGangs.Config.Admin.AcePermission) then

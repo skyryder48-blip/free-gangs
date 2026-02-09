@@ -18,6 +18,7 @@ local ActiveSmuggleMissions = {}     -- gangName -> { missionId, citizenid, item
 local JailedMembers = {}             -- gangName -> { citizenid[] }
 local ContrabandDeliveries = {}      -- citizenid -> { items, deliveredAt }
 local EscapeRequests = {}            -- citizenid -> { requestedBy, gangName, timestamp }
+local PreviousInfluence = {}         -- gangName -> previous influence (for trend tracking)
 
 -- ============================================================================
 -- PRISON ZONE CONTROL
@@ -118,27 +119,35 @@ end
 ---@param newControl number
 function FreeGangs.Server.Prison.CheckBenefitThresholds(gangName, oldControl, newControl)
     local config = FreeGangs.Config.Prison.ControlBenefits
-    
+
     for threshold, benefits in pairs(config) do
-        -- Gained threshold
-        if oldControl < threshold and newControl >= threshold then
-            FreeGangs.Server.NotifyGangMembers(gangName, 
-                'Prison control reached ' .. threshold .. '%! New benefits unlocked.',
-                'success')
-            
-            FreeGangs.Server.DB.Log(gangName, nil, 'prison_threshold_reached', FreeGangs.LogCategories.SYSTEM, {
-                threshold = threshold,
-                benefits = benefits,
-            })
-        -- Lost threshold
-        elseif oldControl >= threshold and newControl < threshold then
-            FreeGangs.Server.NotifyGangMembers(gangName,
-                'Prison control dropped below ' .. threshold .. '%. Benefits lost.',
-                'warning')
-            
-            FreeGangs.Server.DB.Log(gangName, nil, 'prison_threshold_lost', FreeGangs.LogCategories.SYSTEM, {
-                threshold = threshold,
-            })
+        local gained = oldControl < threshold and newControl >= threshold
+        local lost = oldControl >= threshold and newControl < threshold
+
+        if gained or lost then
+            -- Notify online members with ox_lib:notify for each benefit
+            local onlineMembers = FreeGangs.Server.Member.GetOnlineMembers(gangName)
+            for _, member in pairs(onlineMembers) do
+                for _, benefitName in ipairs(benefits) do
+                    TriggerClientEvent('ox_lib:notify', member.source, {
+                        title = 'Prison Control',
+                        description = gained and ('Unlocked: ' .. benefitName) or ('Lost: ' .. benefitName),
+                        type = gained and 'success' or 'error',
+                        duration = 8000,
+                    })
+                end
+            end
+
+            if gained then
+                FreeGangs.Server.DB.Log(gangName, nil, 'prison_threshold_reached', FreeGangs.LogCategories.SYSTEM, {
+                    threshold = threshold,
+                    benefits = benefits,
+                })
+            else
+                FreeGangs.Server.DB.Log(gangName, nil, 'prison_threshold_lost', FreeGangs.LogCategories.SYSTEM, {
+                    threshold = threshold,
+                })
+            end
         end
     end
 end
@@ -229,9 +238,14 @@ function FreeGangs.Server.Prison.UnregisterJailedMember(citizenid, gangName)
     for i, id in ipairs(JailedMembers[gangName]) do
         if id == citizenid then
             table.remove(JailedMembers[gangName], i)
-            
+
+            -- Clean up any pending contraband for this member
+            if ContrabandDeliveries[citizenid] then
+                ContrabandDeliveries[citizenid] = nil
+            end
+
             FreeGangs.Server.DB.Log(gangName, citizenid, 'member_released', FreeGangs.LogCategories.ACTIVITY, {})
-            
+
             return true
         end
     end
@@ -262,7 +276,7 @@ end
 ---@param gangName string|nil If nil, will be determined from player
 ---@return boolean success
 ---@return string|nil message
-function FreeGangs.Server.Prison.StartSmuggleMission(source, gangName)
+function FreeGangs.Server.Prison.StartSmuggleMission(source, gangName, riskLevel)
     local citizenid = FreeGangs.Bridge.GetCitizenId(source)
     if not citizenid then return false, 'Unable to identify player' end
     
@@ -276,53 +290,75 @@ function FreeGangs.Server.Prison.StartSmuggleMission(source, gangName)
     local gang = FreeGangs.Server.Gangs[gangName]
     if not gang then return false, 'Gang not found' end
     
-    local config = FreeGangs.Config.PrisonActivities.SmuggleMissions
-    
+    local config = FreeGangs.Config.Prison.SmuggleMissions
+    local minLevel = FreeGangs.Config.PrisonActivities.SmuggleMissions.minLevel or 3
+
     -- Check level requirement
-    if gang.master_level < config.minLevel then
-        return false, 'Requires Master Level ' .. config.minLevel
+    if gang.master_level < minLevel then
+        return false, 'Requires Master Level ' .. minLevel
     end
-    
+
     -- Check jailed member requirement
-    if config.requireJailedMember and not FreeGangs.Server.Prison.HasJailedMembers(gangName) then
+    if config.RequireJailedMember and not FreeGangs.Server.Prison.HasJailedMembers(gangName) then
         return false, 'Requires a gang member to be jailed'
     end
-    
+
     -- Check cooldown
     local cooldownKey = 'smuggle_' .. gangName
     local onCooldown, remaining = FreeGangs.Server.IsOnCooldown(source, cooldownKey)
     if onCooldown then
         return false, 'Smuggle missions on cooldown. ' .. FreeGangs.Utils.FormatDuration(remaining * 1000) .. ' remaining'
     end
-    
+
     -- Check if mission already active
     if ActiveSmuggleMissions[gangName] then
         return false, 'A smuggle mission is already in progress'
     end
-    
+
     -- Generate mission
     local missionId = FreeGangs.Utils.GenerateId('sm')
     local missionType = FreeGangs.Server.Prison.SelectMissionType()
-    local riskLevel = FreeGangs.Server.Prison.SelectRiskLevel()
-    
+
+    -- Use client-selected risk level if valid, otherwise random
+    local validRiskLevels = { low = true, medium = true, high = true }
+    if not riskLevel or not validRiskLevels[riskLevel] then
+        riskLevel = FreeGangs.Server.Prison.SelectRiskLevel()
+    end
+
     -- Get jailed member to deliver to
     local jailedMembers = FreeGangs.Server.Prison.GetJailedMembers(gangName)
     local targetCitizenId = jailedMembers[math.random(#jailedMembers)]
-    
+
+    -- Risk level payout multipliers and detection chances (from config with fallback)
+    local riskLevels = FreeGangs.Config.PrisonActivities.SmuggleMissions.riskLevels or {
+        low = { payoutMult = 1.0, detectionChance = 0.10 },
+        medium = { payoutMult = 1.5, detectionChance = 0.25 },
+        high = { payoutMult = 2.0, detectionChance = 0.45 },
+    }
+
     -- Calculate payout
-    local basePayout = math.random(config.payout.min, config.payout.max)
-    local riskConfig = config.riskLevels[riskLevel]
+    local basePayout = math.random(config.MinPayout, config.MaxPayout)
+    local riskConfig = riskLevels[riskLevel]
     local finalPayout = math.floor(basePayout * riskConfig.payoutMult)
-    
+
+    -- Mission type item tables (from config with fallback)
+    local missionTypes = FreeGangs.Config.PrisonActivities.SmuggleMissions.types or {
+        contraband = { weight = 50, items = { 'phone', 'lighter', 'radio' } },
+        weapons = { weight = 30, items = { 'weapon_shiv', 'weapon_knife' } },
+        drugs = { weight = 20, items = { 'weed_brick', 'coke_brick', 'oxy' } },
+    }
+
     -- Select items to smuggle
-    local missionTypeConfig = config.types[missionType]
+    local missionTypeConfig = missionTypes[missionType] or missionTypes['contraband']
     local itemsToSmuggle = {}
     local itemCount = math.random(1, 3)
     for i = 1, itemCount do
         local item = missionTypeConfig.items[math.random(#missionTypeConfig.items)]
         table.insert(itemsToSmuggle, item)
     end
-    
+
+    local repReward = FreeGangs.Config.PrisonActivities.SmuggleMissions.repReward or 15
+
     -- Create mission
     ActiveSmuggleMissions[gangName] = {
         missionId = missionId,
@@ -333,14 +369,14 @@ function FreeGangs.Server.Prison.StartSmuggleMission(source, gangName)
         riskLevel = riskLevel,
         items = itemsToSmuggle,
         payout = finalPayout,
-        rep = config.repReward,
+        rep = repReward,
         detectionChance = riskConfig.detectionChance,
         status = 'active',
         startTime = os.time(),
     }
-    
+
     -- Set cooldown
-    FreeGangs.Server.SetCooldown(source, cooldownKey, config.cooldown)
+    FreeGangs.Server.SetCooldown(source, cooldownKey, config.Cooldown)
     
     -- Send to client
     TriggerClientEvent('free-gangs:client:startSmuggleMission', source, {
@@ -360,29 +396,42 @@ function FreeGangs.Server.Prison.StartSmuggleMission(source, gangName)
         payout = finalPayout,
     })
     
-    return true, 'Smuggle mission started'
+    local missionData = {
+        missionId = missionId,
+        missionType = missionType,
+        riskLevel = riskLevel,
+        items = itemsToSmuggle,
+        payout = finalPayout,
+        targetName = FreeGangs.Bridge.GetPlayerNameByCitizenId(targetCitizenId),
+    }
+
+    return true, 'Smuggle mission started', missionData
 end
 
 ---Select a random mission type based on weights
 ---@return string missionType
 function FreeGangs.Server.Prison.SelectMissionType()
-    local config = FreeGangs.Config.PrisonActivities.SmuggleMissions.types
+    local missionTypes = FreeGangs.Config.PrisonActivities.SmuggleMissions.types or {
+        contraband = { weight = 50, items = { 'phone', 'lighter', 'radio' } },
+        weapons = { weight = 30, items = { 'weapon_shiv', 'weapon_knife' } },
+        drugs = { weight = 20, items = { 'weed_brick', 'coke_brick', 'oxy' } },
+    }
     local totalWeight = 0
-    
-    for _, typeConfig in pairs(config) do
-        totalWeight = totalWeight + typeConfig.weight
+
+    for _, typeConfig in pairs(missionTypes) do
+        totalWeight = totalWeight + (typeConfig.weight or 1)
     end
-    
+
     local roll = math.random(totalWeight)
     local cumulative = 0
-    
-    for typeName, typeConfig in pairs(config) do
-        cumulative = cumulative + typeConfig.weight
+
+    for typeName, typeConfig in pairs(missionTypes) do
+        cumulative = cumulative + (typeConfig.weight or 1)
         if roll <= cumulative then
             return typeName
         end
     end
-    
+
     return 'contraband' -- Fallback
 end
 
@@ -402,25 +451,58 @@ end
 function FreeGangs.Server.Prison.CompleteSmuggleMission(source, gangName, success, detected)
     local mission = ActiveSmuggleMissions[gangName]
     if not mission then return false end
-    
+
     local citizenid = FreeGangs.Bridge.GetCitizenId(source)
     if mission.citizenid ~= citizenid then return false end
-    
-    if success and not detected then
+
+    -- Server-authoritative detection roll with prison control modifier
+    local baseDetection = mission.detectionChance
+    local controlLevel = FreeGangs.Server.Prison.GetControlLevel(gangName) or 0
+    local controlBonus = controlLevel * 0.003  -- 0.3% per control point (max 30% at 100%)
+    local adjustedDetection = baseDetection * (1 - controlBonus)
+    local serverDetected = success and (math.random() < adjustedDetection)
+
+    if success and not serverDetected then
         -- Full success
         FreeGangs.Bridge.AddMoney(source, mission.payout, 'cash', 'Smuggle mission')
         FreeGangs.Server.Reputation.Add(gangName, mission.rep, 'Smuggle mission completed')
         
         -- Add prison influence
         FreeGangs.Server.Prison.AddInfluence(gangName, 2, 'Smuggle mission')
-        
+
+        -- Deliver smuggled items to jailed member
+        local deliveryItems = {}
+        for _, itemName in ipairs(mission.items) do
+            table.insert(deliveryItems, { name = itemName, count = 1 })
+        end
+
+        local existing = ContrabandDeliveries[mission.targetCitizenId]
+        if existing then
+            for _, item in ipairs(deliveryItems) do
+                table.insert(existing.items, item)
+            end
+            existing.deliveredAt = os.time()
+        else
+            ContrabandDeliveries[mission.targetCitizenId] = {
+                items = deliveryItems,
+                deliveredBy = citizenid,
+                deliveredAt = os.time(),
+            }
+        end
+
+        -- Notify jailed player if online
+        local jailedPlayer = FreeGangs.Bridge.GetPlayerByCitizenId(mission.targetCitizenId)
+        if jailedPlayer then
+            TriggerClientEvent('free-gangs:client:contrabandReady', jailedPlayer.PlayerData.source)
+        end
+
         FreeGangs.Bridge.Notify(source, 'Smuggle mission complete! +$' .. FreeGangs.Utils.FormatMoney(mission.payout), 'success')
         
         FreeGangs.Server.DB.Log(gangName, citizenid, 'smuggle_mission_completed', FreeGangs.LogCategories.ACTIVITY, {
             missionId = mission.missionId,
             payout = mission.payout,
         })
-    elseif detected then
+    elseif serverDetected then
         -- Detected - partial or no payout
         local partialPayout = math.floor(mission.payout * 0.25)
         if partialPayout > 0 then
@@ -470,13 +552,14 @@ function FreeGangs.Server.Prison.DeliverContraband(source, targetCitizenId, item
     local gangName = membership.gang_name
     local gang = FreeGangs.Server.Gangs[gangName]
     
-    local config = FreeGangs.Config.PrisonActivities.GuardBribes
-    
+    local guardConfig = FreeGangs.Config.Bribes.Contacts[FreeGangs.BribeContacts.PRISON_GUARD]
+    local minLevel = FreeGangs.Config.PrisonActivities.GuardBribes.minLevel or 3
+
     -- Check level requirement
-    if gang.master_level < config.minLevel then
-        return false, 'Requires Master Level ' .. config.minLevel
+    if gang.master_level < minLevel then
+        return false, 'Requires Master Level ' .. minLevel
     end
-    
+
     -- Check if target is jailed gang member
     local jailedMembers = FreeGangs.Server.Prison.GetJailedMembers(gangName)
     local isJailed = false
@@ -486,52 +569,60 @@ function FreeGangs.Server.Prison.DeliverContraband(source, targetCitizenId, item
             break
         end
     end
-    
+
     if not isJailed then
         return false, 'Target is not a jailed gang member'
     end
-    
+
     -- Check cooldown
     local cooldownKey = 'contraband_' .. gangName
     local onCooldown, remaining = FreeGangs.Server.IsOnCooldown(source, cooldownKey)
     if onCooldown then
         return false, 'Contraband delivery on cooldown. ' .. FreeGangs.Utils.FormatDuration(remaining * 1000) .. ' remaining'
     end
-    
+
     -- Check cost (free at 50%+ control)
-    local cost = config.services.contraband.cost
+    local cost = guardConfig.contrabandCost
     if FreeGangs.Server.Prison.HasBenefit(gangName, 'free_contraband') then
         cost = 0
     end
-    
+
     if cost > 0 then
         if FreeGangs.Bridge.GetMoney(source, 'cash') < cost then
             return false, 'Insufficient funds. Need $' .. FreeGangs.Utils.FormatMoney(cost)
         end
         FreeGangs.Bridge.RemoveMoney(source, cost, 'cash', 'Contraband delivery')
     end
-    
+
     -- Check player has items
     for _, item in ipairs(items) do
         if not FreeGangs.Bridge.HasItem(source, item.name, item.count or 1) then
             return false, 'You don\'t have the required items'
         end
     end
-    
+
     -- Remove items from player
     for _, item in ipairs(items) do
         FreeGangs.Bridge.RemoveItem(source, item.name, item.count or 1)
     end
-    
-    -- Store for jailed player to receive
-    ContrabandDeliveries[targetCitizenId] = {
-        items = items,
-        deliveredBy = citizenid,
-        deliveredAt = os.time(),
-    }
-    
+
+    -- Store for jailed player to receive (append to existing delivery if present)
+    local existing = ContrabandDeliveries[targetCitizenId]
+    if existing then
+        for _, item in ipairs(items) do
+            table.insert(existing.items, item)
+        end
+        existing.deliveredAt = os.time()
+    else
+        ContrabandDeliveries[targetCitizenId] = {
+            items = items,
+            deliveredBy = citizenid,
+            deliveredAt = os.time(),
+        }
+    end
+
     -- Set cooldown
-    FreeGangs.Server.SetCooldown(source, cooldownKey, config.services.contraband.cooldown)
+    FreeGangs.Server.SetCooldown(source, cooldownKey, guardConfig.contrabandCooldown)
     
     -- Notify jailed player if online
     local jailedPlayer = FreeGangs.Bridge.GetPlayerByCitizenId(targetCitizenId)
@@ -595,15 +686,20 @@ function FreeGangs.Server.Prison.HelpEscape(source, targetCitizenId)
     local gangName = membership.gang_name
     local gang = FreeGangs.Server.Gangs[gangName]
     
-    local config = FreeGangs.Config.PrisonActivities.GuardBribes
-    
+    local guardConfig = FreeGangs.Config.Bribes.Contacts[FreeGangs.BribeContacts.PRISON_GUARD]
+    local minLevel = FreeGangs.Config.PrisonActivities.GuardBribes.minLevel or 3
+
     -- Check level requirement
-    if gang.master_level < config.minLevel then
-        return false, 'Requires Master Level ' .. config.minLevel
+    if gang.master_level < minLevel then
+        return false, 'Requires Master Level ' .. minLevel
     end
-    
+
     -- Check if target is jailed gang member
     local jailedMembers = FreeGangs.Server.Prison.GetJailedMembers(gangName)
+    if not jailedMembers or #jailedMembers == 0 then
+        return false, 'No jailed gang members'
+    end
+
     local isJailed = false
     for _, id in ipairs(jailedMembers) do
         if id == targetCitizenId then
@@ -611,32 +707,32 @@ function FreeGangs.Server.Prison.HelpEscape(source, targetCitizenId)
             break
         end
     end
-    
+
     if not isJailed then
         return false, 'Target is not a jailed gang member'
     end
-    
+
     -- Check cooldown
     local cooldownKey = 'help_escape_' .. gangName
     local onCooldown, remaining = FreeGangs.Server.IsOnCooldown(source, cooldownKey)
     if onCooldown then
         return false, 'Help escape on cooldown. ' .. FreeGangs.Utils.FormatDuration(remaining * 1000) .. ' remaining'
     end
-    
+
     -- Calculate cost (reduced at 75%+ control)
-    local cost = config.services.helpEscape.cost
+    local cost = guardConfig.helpEscapeCost
     if FreeGangs.Server.Prison.HasBenefit(gangName, 'reduced_escape_cost') then
-        cost = FreeGangs.Config.PrisonActivities.PrisonControl.benefits.reducedEscapeCost
+        cost = FreeGangs.Config.PrisonActivities.PrisonControl.benefits.reducedEscapeCost or 10000
     end
-    
+
     -- Check funds
     if FreeGangs.Bridge.GetMoney(source, 'cash') < cost then
         return false, 'Insufficient funds. Need $' .. FreeGangs.Utils.FormatMoney(cost)
     end
-    
+
     -- Remove payment
     FreeGangs.Bridge.RemoveMoney(source, cost, 'cash', 'Prison escape bribe')
-    
+
     -- Store escape request
     EscapeRequests[targetCitizenId] = {
         requestedBy = citizenid,
@@ -644,10 +740,10 @@ function FreeGangs.Server.Prison.HelpEscape(source, targetCitizenId)
         timestamp = os.time(),
         cost = cost,
     }
-    
+
     -- Set cooldown
-    FreeGangs.Server.SetCooldown(source, cooldownKey, config.services.helpEscape.cooldown)
-    
+    FreeGangs.Server.SetCooldown(source, cooldownKey, (FreeGangs.Config.Prison.EscapeCooldownMs or 3600000))
+
     -- Trigger escape for jailed player
     local jailedPlayer = FreeGangs.Bridge.GetPlayerByCitizenId(targetCitizenId)
     if jailedPlayer then
@@ -696,6 +792,42 @@ function FreeGangs.Server.Prison.CompleteEscape(citizenid)
     FreeGangs.Server.DB.Log(gangName, citizenid, 'prison_escape_completed', FreeGangs.LogCategories.ACTIVITY, {})
 end
 
+---Find an escape request initiated by a specific player
+---@param requesterCitizenId string The citizenid of the player who initiated the escape
+---@param gangName string The gang name
+---@return string|nil targetCitizenId
+function FreeGangs.Server.Prison.FindEscapeRequestByRequester(requesterCitizenId, gangName)
+    for targetCid, request in pairs(EscapeRequests) do
+        if request.requestedBy == requesterCitizenId and request.gangName == gangName then
+            return targetCid
+        end
+    end
+    return nil
+end
+
+---Handle a failed prison escape attempt
+---@param targetCitizenId string
+function FreeGangs.Server.Prison.FailEscape(targetCitizenId)
+    local escapeRequest = EscapeRequests[targetCitizenId]
+    if not escapeRequest then return end
+
+    local gangName = escapeRequest.gangName
+
+    -- Clear request
+    EscapeRequests[targetCitizenId] = nil
+
+    -- Penalty: lose influence
+    FreeGangs.Server.Prison.RemoveInfluence(gangName, 3, 'Failed prison escape')
+
+    -- Notify gang
+    FreeGangs.Server.NotifyGangMembers(gangName, 'Prison escape attempt failed!', 'error')
+
+    -- Log
+    FreeGangs.Server.DB.Log(gangName, escapeRequest.requestedBy, 'prison_escape_failed', FreeGangs.LogCategories.ACTIVITY, {
+        target = targetCitizenId,
+    })
+end
+
 -- ============================================================================
 -- PRISON CONTROL TIER 3 (51%+ Control)
 -- ============================================================================
@@ -706,21 +838,23 @@ end
 function FreeGangs.Server.Prison.HasFullControl(gangName)
     local gang = FreeGangs.Server.Gangs[gangName]
     if not gang then return false, nil end
-    
-    local config = FreeGangs.Config.PrisonActivities.PrisonControl
-    
+
+    local minLevel = 5
+    local minControl = 51
+    local fullControlBenefits = { jailReduction = FreeGangs.Config.PrisonActivities.PrisonControl.benefits.jailReduction or 0.3 }
+
     -- Check level requirement
-    if gang.master_level < config.minLevel then
+    if gang.master_level < minLevel then
         return false, nil
     end
-    
+
     -- Check control requirement
     local control = FreeGangs.Server.Prison.GetControlLevel(gangName)
-    if control < config.minControl then
+    if control < minControl then
         return false, nil
     end
-    
-    return true, config.benefits
+
+    return true, fullControlBenefits
 end
 
 ---Get jail time reduction for a gang member
@@ -739,16 +873,52 @@ end
 
 ---Process prison influence decay (called periodically)
 function FreeGangs.Server.Prison.ProcessDecay()
-    local decayAmount = 1 -- 1% decay per cycle
-    
+    local decayAmount = FreeGangs.Config.Prison.DecayAmount or 1
+
     for gangName, influence in pairs(PrisonInfluence) do
+        -- Store previous influence for trend tracking
+        PreviousInfluence[gangName] = influence
+
         if influence > 0 then
             FreeGangs.Server.Prison.RemoveInfluence(gangName, decayAmount, 'Natural decay')
         end
+
+        -- Passive influence gain from jailed members
+        local jailedMembers = FreeGangs.Server.Prison.GetJailedMembers(gangName)
+        local jailedCount = jailedMembers and #jailedMembers or 0
+        if jailedCount > 0 then
+            local passiveGain = jailedCount * (FreeGangs.Config.Prison.PassiveInfluencePerMember or 0.5)
+            local currentInfluence = PrisonInfluence[gangName] or 0
+            PrisonInfluence[gangName] = math.min(100, currentInfluence + passiveGain)
+        end
     end
-    
+
+    -- Cleanup expired contraband
+    FreeGangs.Server.Prison.CleanupExpiredContraband()
+
     if FreeGangs.Debug then
         print('[FREE-GANGS] Prison influence decay processed')
+    end
+end
+
+-- ============================================================================
+-- CONTRABAND EXPIRY AND CLEANUP
+-- ============================================================================
+
+---Clean up expired contraband deliveries
+function FreeGangs.Server.Prison.CleanupExpiredContraband()
+    local expiryHours = FreeGangs.Config.Prison.ContrabandExpiryHours or 24
+    local expirySeconds = expiryHours * 3600
+    local now = os.time()
+
+    for citizenid, delivery in pairs(ContrabandDeliveries) do
+        if delivery.deliveredAt and (now - delivery.deliveredAt) > expirySeconds then
+            ContrabandDeliveries[citizenid] = nil
+
+            if FreeGangs.Debug then
+                print('[FREE-GANGS] Expired contraband cleaned up for ' .. citizenid)
+            end
+        end
     end
 end
 
@@ -780,24 +950,42 @@ end
 ---@return table leaderboard
 function FreeGangs.Server.Prison.GetLeaderboard()
     local leaderboard = {}
-    
+
     for gangName, influence in pairs(PrisonInfluence) do
         local gang = FreeGangs.Server.Gangs[gangName]
         if gang and influence > 0 then
+            -- Compute trend based on previous influence
+            local prev = PreviousInfluence[gangName] or influence
+            local trend = 'stable'
+            if influence > prev then
+                trend = 'rising'
+            elseif influence < prev then
+                trend = 'falling'
+            end
+
+            -- Count active benefits
+            local activeBenefits = FreeGangs.Server.Prison.GetActiveBenefits(gangName)
+            local benefitCount = 0
+            for _ in pairs(activeBenefits) do
+                benefitCount = benefitCount + 1
+            end
+
             table.insert(leaderboard, {
                 gangName = gangName,
                 label = gang.label,
                 color = gang.color,
                 influence = influence,
+                trend = trend,
+                activeBenefits = benefitCount,
             })
         end
     end
-    
+
     -- Sort by influence descending
     table.sort(leaderboard, function(a, b)
         return a.influence > b.influence
     end)
-    
+
     return leaderboard
 end
 
