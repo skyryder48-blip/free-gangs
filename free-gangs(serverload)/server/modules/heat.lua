@@ -408,58 +408,107 @@ end
 -- HEAT DECAY SYSTEM
 -- ============================================================================
 
----Process heat decay for all gang pairs
+---Get the stage-based decay multiplier for a heat level
+---@param stage string Heat stage name
+---@return number multiplier
+local function GetStageDecayMultiplier(stage)
+    local multipliers = FreeGangs.Config.Heat.StageDecayMultipliers
+    if not multipliers then return 1.0 end
+    return multipliers[stage] or 1.0
+end
+
+---Process heat decay for all gang pairs (stage-differentiated)
+---Uses time-based tick calculation for accurate catch-up after server downtime.
+---Stage multipliers slow decay at higher stages (war/rivalry persist longer)
+---and accelerate it at lower stages (trace beef clears faster).
 function FreeGangs.Server.Heat.ProcessDecay()
     local currentTime = os.time()
     local gangDecayRate = FreeGangs.Config.Heat.GangDecayRate
     local gangDecayInterval = FreeGangs.Config.Heat.GangDecayMinutes * 60
-    
+
     local decayedCount = 0
-    
+
     for key, heatData in pairs(FreeGangs.Server.Heat) do
         -- Skip if no heat
         if heatData.heat_level <= 0 then
             goto continue
         end
-        
+
         -- Check if enough time has passed for decay
         local lastDecay = heatData.last_decay or currentTime
         local timeSinceDecay = currentTime - lastDecay
-        
+
         if timeSinceDecay >= gangDecayInterval then
-            -- Calculate decay ticks
             local decayTicks = math.floor(timeSinceDecay / gangDecayInterval)
-            local totalDecay = gangDecayRate * decayTicks
-            
+
+            -- Apply stage-differentiated multiplier
+            local stageMultiplier = GetStageDecayMultiplier(heatData.stage)
+            local rawDecay = gangDecayRate * decayTicks * stageMultiplier
+            local totalDecay = math.floor(rawDecay)
+
+            -- Skip if multiplier is too low for any decay this cycle
+            if totalDecay <= 0 then
+                goto continue
+            end
+
             local oldHeat = heatData.heat_level
             local oldStage = heatData.stage
-            
+
             -- Apply decay
             local newHeat = math.max(0, heatData.heat_level - totalDecay)
             local newStage = FreeGangs.Utils.GetHeatStage(newHeat)
-            
+
             -- Update data
             heatData.heat_level = newHeat
             heatData.stage = newStage
-            heatData.last_decay = currentTime
-            
-            -- Mark dirty
+            heatData.last_decay = lastDecay + (decayTicks * gangDecayInterval)
+
+            -- Mark dirty for cache flush
             MarkHeatDirty(heatData.gang_a, heatData.gang_b)
-            
+
             -- Check for stage change
             if oldStage ~= newStage then
                 FreeGangs.Server.Heat.OnStageChange(heatData.gang_a, heatData.gang_b, oldStage, newStage)
             end
-            
+
             decayedCount = decayedCount + 1
         end
-        
+
         ::continue::
     end
-    
+
     if decayedCount > 0 then
         FreeGangs.Utils.Debug('Processed heat decay for ' .. decayedCount .. ' gang pairs')
     end
+end
+
+---Process individual player heat decay
+---Decays all player heat records directly in the database.
+---Runs on its own interval (IndividualDecayMinutes from config).
+function FreeGangs.Server.Heat.ProcessPlayerDecay()
+    local decayRate = FreeGangs.Config.Heat.IndividualDecayRate
+    local decayMinutes = FreeGangs.Config.Heat.IndividualDecayMinutes
+
+    -- Batch-decay all players whose last_decay is older than the interval
+    -- Uses TIMESTAMPDIFF to calculate elapsed ticks for accurate catch-up
+    local affected = MySQL.update.await([[
+        UPDATE freegangs_player_heat
+        SET heat_points = GREATEST(0, heat_points - (? * FLOOR(TIMESTAMPDIFF(MINUTE, last_decay, NOW()) / ?))),
+            last_decay = DATE_ADD(last_decay, INTERVAL (FLOOR(TIMESTAMPDIFF(MINUTE, last_decay, NOW()) / ?) * ?) MINUTE)
+        WHERE heat_points > 0
+          AND TIMESTAMPDIFF(MINUTE, last_decay, NOW()) >= ?
+    ]], { decayRate, decayMinutes, decayMinutes, decayMinutes, decayMinutes })
+
+    if affected and affected > 0 then
+        FreeGangs.Utils.Debug('Processed player heat decay for ' .. affected .. ' players')
+    end
+
+    -- Clean up zero-heat records older than 24 hours to prevent table bloat
+    MySQL.query([[
+        DELETE FROM freegangs_player_heat
+        WHERE heat_points <= 0
+          AND last_activity < DATE_SUB(NOW(), INTERVAL 24 HOUR)
+    ]])
 end
 
 -- ============================================================================

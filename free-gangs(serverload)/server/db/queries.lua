@@ -517,10 +517,12 @@ end
 ---@return table
 function FreeGangs.Server.DB.GetAllHeat()
     local result = MySQL.query.await([[
-        SELECT id, gang_a, gang_b, heat_level, stage, last_incident, last_decay
+        SELECT id, gang_a, gang_b, heat_level, stage,
+               UNIX_TIMESTAMP(last_incident) as last_incident,
+               UNIX_TIMESTAMP(last_decay) as last_decay
         FROM freegangs_heat
     ]])
-    
+
     return result or {}
 end
 
@@ -531,9 +533,11 @@ end
 function FreeGangs.Server.DB.GetHeat(gangA, gangB)
     -- Ensure consistent ordering
     gangA, gangB = FreeGangs.Utils.GetOrderedGangPair(gangA, gangB)
-    
+
     return MySQL.single.await([[
-        SELECT id, gang_a, gang_b, heat_level, stage, last_incident, last_decay
+        SELECT id, gang_a, gang_b, heat_level, stage,
+               UNIX_TIMESTAMP(last_incident) as last_incident,
+               UNIX_TIMESTAMP(last_decay) as last_decay
         FROM freegangs_heat
         WHERE gang_a = ? AND gang_b = ?
     ]], { gangA, gangB })

@@ -149,12 +149,21 @@ function FreeGangs.Server.StartBackgroundTasks()
         end
     end)
     
-    -- Heat decay task
+    -- Gang heat decay task (uses sophisticated time-based decay from heat module)
     CreateThread(function()
         local decayInterval = FreeGangs.Config.Heat.GangDecayMinutes * 60 * 1000
         while true do
             Wait(decayInterval)
-            FreeGangs.Server.ProcessHeatDecay()
+            FreeGangs.Server.Heat.ProcessDecay()
+        end
+    end)
+
+    -- Player heat decay task
+    CreateThread(function()
+        local decayInterval = FreeGangs.Config.Heat.IndividualDecayMinutes * 60 * 1000
+        while true do
+            Wait(decayInterval)
+            FreeGangs.Server.Heat.ProcessPlayerDecay()
         end
     end)
     
@@ -233,34 +242,6 @@ function FreeGangs.Server.ProcessTerritoryDecay()
     FreeGangs.Utils.Debug('Processed territory decay')
 end
 
----Process heat decay between gangs
-function FreeGangs.Server.ProcessHeatDecay()
-    local decayRate = FreeGangs.Config.Heat.GangDecayRate
-    
-    for key, heatData in pairs(FreeGangs.Server.Heat) do
-        if heatData.heat_level > 0 then
-            local newHeat = math.max(0, heatData.heat_level - decayRate)
-            
-            if newHeat ~= heatData.heat_level then
-                local oldStage = FreeGangs.Utils.GetHeatStage(heatData.heat_level)
-                local newStage = FreeGangs.Utils.GetHeatStage(newHeat)
-                
-                heatData.heat_level = newHeat
-                heatData.stage = newStage
-                
-                -- Mark for database update
-                FreeGangs.Server.Cache.MarkDirty('heat', key)
-                
-                -- Notify if stage changed
-                if newStage ~= oldStage then
-                    FreeGangs.Server.OnHeatStageChange(heatData.gang_a, heatData.gang_b, oldStage, newStage)
-                end
-            end
-        end
-    end
-    
-    FreeGangs.Utils.Debug('Processed heat decay')
-end
 
 ---Process bribe payment deadlines
 function FreeGangs.Server.ProcessBribePayments()
@@ -500,26 +481,6 @@ function FreeGangs.Server.OnLevelChange(gangName, oldLevel, newLevel)
     ))
 end
 
----Handle heat stage change events
----@param gangA string
----@param gangB string
----@param oldStage string
----@param newStage string
-function FreeGangs.Server.OnHeatStageChange(gangA, gangB, oldStage, newStage)
-    local gangAData = FreeGangs.Server.Gangs[gangA]
-    local gangBData = FreeGangs.Server.Gangs[gangB]
-    
-    if not gangAData or not gangBData then return end
-    
-    local stageInfo = FreeGangs.HeatStageThresholds[newStage]
-    
-    -- Notify both gangs
-    local message = string.format(FreeGangs.Config.Messages.StageChanged, gangBData.label, stageInfo.label)
-    FreeGangs.Bridge.NotifyGang(gangA, message, 'warning')
-    
-    message = string.format(FreeGangs.Config.Messages.StageChanged, gangAData.label, stageInfo.label)
-    FreeGangs.Bridge.NotifyGang(gangB, message, 'warning')
-end
 
 -- ============================================================================
 -- DISCORD WEBHOOK

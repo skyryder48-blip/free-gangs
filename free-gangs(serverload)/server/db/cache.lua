@@ -158,13 +158,14 @@ local function FlushHeat()
         if heatData then
             queries[#queries + 1] = {
                 [[
-                    UPDATE freegangs_heat 
-                    SET heat_level = ?, stage = ?, last_decay = CURRENT_TIMESTAMP
+                    UPDATE freegangs_heat
+                    SET heat_level = ?, stage = ?, last_decay = FROM_UNIXTIME(?)
                     WHERE gang_a = ? AND gang_b = ?
                 ]],
                 {
                     heatData.heat_level,
                     heatData.stage,
+                    heatData.last_decay or os.time(),
                     heatData.gang_a,
                     heatData.gang_b
                 }

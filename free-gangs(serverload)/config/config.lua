@@ -157,6 +157,17 @@ FreeGangs.Config.Heat = {
         ProtectionCollect = 12,
     },
     
+    -- Stage-differentiated decay multipliers (applied to GangDecayRate per tick)
+    -- Higher stages decay slower (stickier beef), lower stages fade faster
+    -- Overall ~15hr from 90→0 preserved
+    StageDecayMultipliers = {
+        war_ready = 0.4,    -- War-level beef: very persistent
+        rivalry = 0.5,      -- Deep rivalries: slow to cool
+        cold_war = 0.9,     -- Simmering conflict: near-baseline
+        tension = 1.3,      -- Mild tension: fades moderately fast
+        neutral = 1.8,      -- Trace beef: clears quickly
+    },
+
     -- Rivalry (Stage 3) effects
     Rivalry = {
         -- Drug profit reduction in contested zones
