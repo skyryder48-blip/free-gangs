@@ -527,7 +527,7 @@ FreeGangs.ActivityPoints = {
     [FreeGangs.Activities.MUGGING] = {
         masterRep = 5,
         zoneInfluence = 10,
-        heat = 22,
+        heat = 10,
     },
     [FreeGangs.Activities.PICKPOCKET] = {
         masterRep = 0,
