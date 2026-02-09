@@ -254,17 +254,12 @@ function FreeGangs.Client.Prison.StartSmuggleMission()
 
     if confirm ~= 'confirm' then return end
 
-    -- Call server to start mission
-    local result = lib.callback.await('free-gangs:callback:startSmuggleMission', false)
+    -- Call server to start mission with selected risk level
+    local result = lib.callback.await('free-gangs:callback:startSmuggleMission', false, selectedRisk)
 
-    if result and result.success then
-        lib.notify({
-            title = 'Smuggle Mission',
-            description = result.message or 'Mission started! Check your objectives.',
-            type = 'success',
-            duration = 8000,
-            icon = 'truck-fast',
-        })
+    if result and result.success and result.missionData then
+        -- Launch in-world smuggle run
+        FreeGangs.Client.Prison.StartSmuggleRun(result.missionData)
     else
         lib.notify({
             title = 'Smuggle Mission Failed',
@@ -274,6 +269,204 @@ function FreeGangs.Client.Prison.StartSmuggleMission()
             icon = 'circle-exclamation',
         })
     end
+end
+
+-- ============================================================================
+-- SMUGGLE MISSION: IN-WORLD RUN
+-- ============================================================================
+
+---Launch the in-world smuggle run after server confirms the mission
+---@param missionData table Mission details from server
+function FreeGangs.Client.Prison.StartSmuggleRun(missionData)
+    if activeMission then
+        lib.notify({
+            title = 'Smuggle Mission',
+            description = 'A mission is already in progress',
+            type = 'warning',
+            duration = 5000,
+        })
+        return
+    end
+
+    -- Set mission state
+    activeMission = {
+        type = 'smuggle',
+        missionId = missionData.missionId,
+        missionType = missionData.missionType,
+        riskLevel = missionData.riskLevel,
+        payout = missionData.payout,
+        phase = 'delivery',
+        startTime = GetGameTimer(),
+    }
+
+    -- Show mission brief
+    lib.notify({
+        title = 'Smuggle Mission Active',
+        description = string.format(
+            'Type: %s | Risk: %s | Payout: $%s',
+            (missionData.missionType or 'unknown'):gsub('^%l', string.upper),
+            (missionData.riskLevel or 'unknown'):gsub('^%l', string.upper),
+            missionData.payout or '???'
+        ),
+        type = 'success',
+        duration = 10000,
+        icon = 'truck-fast',
+    })
+
+    if missionData.targetName then
+        lib.notify({
+            title = 'Delivery Target',
+            description = 'Deliver to: ' .. missionData.targetName,
+            type = 'inform',
+            duration = 8000,
+            icon = 'user',
+        })
+    end
+
+    -- Pick a random smuggle drop point near prison
+    local smugglePoints = FreeGangs.Client.Prison.GetSmugglePoints()
+    local dropPoint = smugglePoints[math.random(#smugglePoints)]
+
+    -- Set waypoint to drop point
+    SetNewWaypoint(dropPoint.x, dropPoint.y)
+
+    lib.notify({
+        title = 'Smuggle Mission',
+        description = 'Head to the drop-off point!',
+        type = 'warning',
+        duration = 8000,
+        icon = 'location-dot',
+    })
+
+    -- Create delivery zone
+    local deliveryZone = lib.zones.sphere({
+        coords = dropPoint,
+        radius = 10.0,
+        debug = FreeGangs.Config.Debug or (FreeGangs.Config.General and FreeGangs.Config.General.Debug),
+        inside = function()
+            if activeMission and activeMission.phase == 'delivery' then
+                DrawMarker(
+                    1,                                          -- cylinder
+                    dropPoint.x, dropPoint.y, dropPoint.z - 1.0,
+                    0, 0, 0,
+                    0, 0, 0,
+                    8.0, 8.0, 1.0,
+                    255, 200, 0, 120,                           -- yellow RGBA
+                    false, false, 2, false, nil, nil, false
+                )
+            end
+        end,
+        onEnter = function()
+            if activeMission and activeMission.phase == 'delivery' then
+                FreeGangs.Client.Prison.DoSmuggleDropoff()
+            end
+        end,
+    })
+
+    activeMission.deliveryZone = deliveryZone
+
+    -- Mission timer (10 minutes)
+    CreateThread(function()
+        local timerMs = 600000
+        local startTime = GetGameTimer()
+        local warningShown = false
+
+        while activeMission and activeMission.type == 'smuggle' do
+            local elapsed = GetGameTimer() - startTime
+
+            -- 2-minute warning
+            if not warningShown and elapsed >= (timerMs - 120000) then
+                warningShown = true
+                lib.notify({
+                    title = 'Smuggle Mission',
+                    description = '2 minutes remaining!',
+                    type = 'warning',
+                    duration = 5000,
+                    icon = 'clock',
+                })
+            end
+
+            -- Time expired
+            if elapsed >= timerMs then
+                if activeMission and activeMission.type == 'smuggle' then
+                    FreeGangs.Client.Prison.FailSmuggle('Time expired')
+                end
+                return
+            end
+
+            Wait(1000)
+        end
+    end)
+end
+
+---Perform the contraband drop-off at the delivery zone
+function FreeGangs.Client.Prison.DoSmuggleDropoff()
+    if not activeMission or activeMission.phase ~= 'delivery' then return end
+
+    activeMission.phase = 'dropoff'
+
+    lib.notify({
+        title = 'Smuggle Mission',
+        description = 'Dropping off contraband... stay still!',
+        type = 'warning',
+        duration = 5000,
+        icon = 'box',
+    })
+
+    local success = lib.progressBar({
+        duration = 10000,
+        label = 'Dropping off contraband...',
+        useWhileDead = false,
+        canCancel = true,
+        disable = {
+            move = true,
+            car = true,
+            combat = true,
+        },
+        anim = {
+            dict = 'anim@heists@box_carry@',
+            clip = 'idle',
+        },
+    })
+
+    if not success then
+        FreeGangs.Client.Prison.FailSmuggle('Drop-off cancelled')
+        return
+    end
+
+    -- Tell server we completed the drop (server handles detection roll)
+    local result = lib.callback.await('free-gangs:callback:completeSmuggleMission', false, true, false)
+
+    if result then
+        lib.notify({
+            title = 'Smuggle Mission',
+            description = 'Drop-off complete! Check your payment.',
+            type = 'success',
+            duration = 8000,
+            icon = 'circle-check',
+        })
+    end
+
+    FreeGangs.Client.Prison.CleanupMission()
+end
+
+---Fail the smuggle mission with a reason
+---@param reason string
+function FreeGangs.Client.Prison.FailSmuggle(reason)
+    if not activeMission then return end
+
+    -- Notify server of failure
+    lib.callback.await('free-gangs:callback:completeSmuggleMission', false, false, false)
+
+    lib.notify({
+        title = 'Smuggle Mission Failed',
+        description = reason or 'The smuggle mission has failed',
+        type = 'error',
+        duration = 8000,
+        icon = 'circle-xmark',
+    })
+
+    FreeGangs.Client.Prison.CleanupMission()
 end
 
 -- ============================================================================
@@ -733,7 +926,7 @@ function FreeGangs.Client.Prison.DoBreakout()
     -- Determine safehouse location (gang HQ or predefined fallback)
     local safehouse = FreeGangs.Client.GangHQ
         or (FreeGangs.Client.PlayerGang and FreeGangs.Client.PlayerGang.hqCoords)
-        or vector3(0.0, 0.0, 0.0)
+        or vector3(1604.25, 3570.84, 37.78)
 
     -- If safehouse is a vector4, convert to vector3 for waypoint
     local safeX = safehouse.x or 0.0
@@ -787,7 +980,7 @@ function FreeGangs.Client.Prison.CompleteEscape()
     ClearPlayerWantedLevel(PlayerId())
 
     -- Notify server of successful escape
-    lib.callback.await('free-gangs:callback:completeSmuggleMission', false, true, false)
+    lib.callback.await('free-gangs:callback:completeEscape', false, true)
 
     lib.notify({
         title = 'Prison Break Complete!',
@@ -807,7 +1000,7 @@ function FreeGangs.Client.Prison.FailEscape(reason)
     if not activeMission then return end
 
     -- Notify server of failure
-    lib.callback.await('free-gangs:callback:completeSmuggleMission', false, false, false)
+    lib.callback.await('free-gangs:callback:completeEscape', false, false)
 
     lib.notify({
         title = 'Prison Break Failed',
@@ -835,6 +1028,12 @@ function FreeGangs.Client.Prison.CleanupMission()
     if activeMission.safehouseZone then
         activeMission.safehouseZone:remove()
         activeMission.safehouseZone = nil
+    end
+
+    -- Remove delivery zone
+    if activeMission.deliveryZone then
+        activeMission.deliveryZone:remove()
+        activeMission.deliveryZone = nil
     end
 
     -- Clear waypoint
@@ -1002,32 +1201,20 @@ RegisterNetEvent('free-gangs:client:escapeInitiated', function(data)
     })
 end)
 
--- Smuggle mission data from server (triggered when server starts a mission)
+-- Smuggle mission data from server (notification for other gang members)
 RegisterNetEvent('free-gangs:client:startSmuggleMission', function(data)
     if not data then return end
 
+    -- Skip if this player already has an active mission (they initiated it)
+    if activeMission then return end
+
     lib.notify({
-        title = 'Smuggle Mission Active',
-        description = string.format(
-            'Type: %s | Risk: %s | Payout: $%s',
-            (data.missionType or 'unknown'):gsub('^%l', string.upper),
-            (data.riskLevel or 'unknown'):gsub('^%l', string.upper),
-            data.payout or '???'
-        ),
+        title = 'Gang Smuggle Mission',
+        description = 'A smuggle mission has been started by a gang member',
         type = 'inform',
-        duration = 10000,
+        duration = 5000,
         icon = 'truck-fast',
     })
-
-    if data.targetName then
-        lib.notify({
-            title = 'Delivery Target',
-            description = 'Deliver to: ' .. data.targetName,
-            type = 'inform',
-            duration = 8000,
-            icon = 'user',
-        })
-    end
 end)
 
 -- Cleanup on resource stop

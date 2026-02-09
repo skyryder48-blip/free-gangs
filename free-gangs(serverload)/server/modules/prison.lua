@@ -276,7 +276,7 @@ end
 ---@param gangName string|nil If nil, will be determined from player
 ---@return boolean success
 ---@return string|nil message
-function FreeGangs.Server.Prison.StartSmuggleMission(source, gangName)
+function FreeGangs.Server.Prison.StartSmuggleMission(source, gangName, riskLevel)
     local citizenid = FreeGangs.Bridge.GetCitizenId(source)
     if not citizenid then return false, 'Unable to identify player' end
     
@@ -318,7 +318,12 @@ function FreeGangs.Server.Prison.StartSmuggleMission(source, gangName)
     -- Generate mission
     local missionId = FreeGangs.Utils.GenerateId('sm')
     local missionType = FreeGangs.Server.Prison.SelectMissionType()
-    local riskLevel = FreeGangs.Server.Prison.SelectRiskLevel()
+
+    -- Use client-selected risk level if valid, otherwise random
+    local validRiskLevels = { low = true, medium = true, high = true }
+    if not riskLevel or not validRiskLevels[riskLevel] then
+        riskLevel = FreeGangs.Server.Prison.SelectRiskLevel()
+    end
 
     -- Get jailed member to deliver to
     local jailedMembers = FreeGangs.Server.Prison.GetJailedMembers(gangName)
@@ -391,7 +396,16 @@ function FreeGangs.Server.Prison.StartSmuggleMission(source, gangName)
         payout = finalPayout,
     })
     
-    return true, 'Smuggle mission started'
+    local missionData = {
+        missionId = missionId,
+        missionType = missionType,
+        riskLevel = riskLevel,
+        items = itemsToSmuggle,
+        payout = finalPayout,
+        targetName = FreeGangs.Bridge.GetPlayerNameByCitizenId(targetCitizenId),
+    }
+
+    return true, 'Smuggle mission started', missionData
 end
 
 ---Select a random mission type based on weights
@@ -441,18 +455,14 @@ function FreeGangs.Server.Prison.CompleteSmuggleMission(source, gangName, succes
     local citizenid = FreeGangs.Bridge.GetCitizenId(source)
     if mission.citizenid ~= citizenid then return false end
 
-    -- Apply prison control modifier to detection chance
+    -- Server-authoritative detection roll with prison control modifier
     local baseDetection = mission.detectionChance
     local controlLevel = FreeGangs.Server.Prison.GetControlLevel(gangName) or 0
     local controlBonus = controlLevel * 0.003  -- 0.3% per control point (max 30% at 100%)
     local adjustedDetection = baseDetection * (1 - controlBonus)
+    local serverDetected = success and (math.random() < adjustedDetection)
 
-    -- Re-evaluate detection server-side with adjusted chance
-    if detected then
-        detected = math.random() < adjustedDetection
-    end
-
-    if success and not detected then
+    if success and not serverDetected then
         -- Full success
         FreeGangs.Bridge.AddMoney(source, mission.payout, 'cash', 'Smuggle mission')
         FreeGangs.Server.Reputation.Add(gangName, mission.rep, 'Smuggle mission completed')
@@ -466,7 +476,7 @@ function FreeGangs.Server.Prison.CompleteSmuggleMission(source, gangName, succes
             missionId = mission.missionId,
             payout = mission.payout,
         })
-    elseif detected then
+    elseif serverDetected then
         -- Detected - partial or no payout
         local partialPayout = math.floor(mission.payout * 0.25)
         if partialPayout > 0 then
@@ -746,6 +756,42 @@ function FreeGangs.Server.Prison.CompleteEscape(citizenid)
     
     -- Log
     FreeGangs.Server.DB.Log(gangName, citizenid, 'prison_escape_completed', FreeGangs.LogCategories.ACTIVITY, {})
+end
+
+---Find an escape request initiated by a specific player
+---@param requesterCitizenId string The citizenid of the player who initiated the escape
+---@param gangName string The gang name
+---@return string|nil targetCitizenId
+function FreeGangs.Server.Prison.FindEscapeRequestByRequester(requesterCitizenId, gangName)
+    for targetCid, request in pairs(EscapeRequests) do
+        if request.requestedBy == requesterCitizenId and request.gangName == gangName then
+            return targetCid
+        end
+    end
+    return nil
+end
+
+---Handle a failed prison escape attempt
+---@param targetCitizenId string
+function FreeGangs.Server.Prison.FailEscape(targetCitizenId)
+    local escapeRequest = EscapeRequests[targetCitizenId]
+    if not escapeRequest then return end
+
+    local gangName = escapeRequest.gangName
+
+    -- Clear request
+    EscapeRequests[targetCitizenId] = nil
+
+    -- Penalty: lose influence
+    FreeGangs.Server.Prison.RemoveInfluence(gangName, 3, 'Failed prison escape')
+
+    -- Notify gang
+    FreeGangs.Server.NotifyGangMembers(gangName, 'Prison escape attempt failed!', 'error')
+
+    -- Log
+    FreeGangs.Server.DB.Log(gangName, escapeRequest.requestedBy, 'prison_escape_failed', FreeGangs.LogCategories.ACTIVITY, {
+        target = targetCitizenId,
+    })
 end
 
 -- ============================================================================

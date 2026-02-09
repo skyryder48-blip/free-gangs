@@ -65,9 +65,13 @@ lib.callback.register('free-gangs:callback:getJailedMembers', function(source)
 end)
 
 ---Start smuggle mission
-lib.callback.register('free-gangs:callback:startSmuggleMission', function(source)
-    local success, message = FreeGangs.Server.Prison.StartSmuggleMission(source)
-    return { success = success, message = message }
+lib.callback.register('free-gangs:callback:startSmuggleMission', function(source, riskLevel)
+    local success, message, missionData = FreeGangs.Server.Prison.StartSmuggleMission(source, nil, riskLevel)
+    if success then
+        return { success = true, message = message, missionData = missionData }
+    else
+        return { success = false, message = message }
+    end
 end)
 
 ---Complete smuggle mission
@@ -108,4 +112,24 @@ lib.callback.register('free-gangs:callback:getJailTimeReduction', function(sourc
     if not membership then return 0 end
 
     return FreeGangs.Server.Prison.GetJailTimeReduction(membership.gang_name)
+end)
+
+---Complete escape mission (success or failure)
+lib.callback.register('free-gangs:callback:completeEscape', function(source, success)
+    local citizenid = FreeGangs.Bridge.GetCitizenId(source)
+    if not citizenid then return false end
+
+    local membership = FreeGangs.Server.DB.GetPlayerMembership(citizenid)
+    if not membership then return false end
+
+    local targetCid = FreeGangs.Server.Prison.FindEscapeRequestByRequester(citizenid, membership.gang_name)
+    if not targetCid then return false end
+
+    if success then
+        FreeGangs.Server.Prison.CompleteEscape(targetCid)
+    else
+        FreeGangs.Server.Prison.FailEscape(targetCid)
+    end
+
+    return true
 end)
