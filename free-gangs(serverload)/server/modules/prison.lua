@@ -469,7 +469,33 @@ function FreeGangs.Server.Prison.CompleteSmuggleMission(source, gangName, succes
         
         -- Add prison influence
         FreeGangs.Server.Prison.AddInfluence(gangName, 2, 'Smuggle mission')
-        
+
+        -- Deliver smuggled items to jailed member
+        local deliveryItems = {}
+        for _, itemName in ipairs(mission.items) do
+            table.insert(deliveryItems, { name = itemName, count = 1 })
+        end
+
+        local existing = ContrabandDeliveries[mission.targetCitizenId]
+        if existing then
+            for _, item in ipairs(deliveryItems) do
+                table.insert(existing.items, item)
+            end
+            existing.deliveredAt = os.time()
+        else
+            ContrabandDeliveries[mission.targetCitizenId] = {
+                items = deliveryItems,
+                deliveredBy = citizenid,
+                deliveredAt = os.time(),
+            }
+        end
+
+        -- Notify jailed player if online
+        local jailedPlayer = FreeGangs.Bridge.GetPlayerByCitizenId(mission.targetCitizenId)
+        if jailedPlayer then
+            TriggerClientEvent('free-gangs:client:contrabandReady', jailedPlayer.PlayerData.source)
+        end
+
         FreeGangs.Bridge.Notify(source, 'Smuggle mission complete! +$' .. FreeGangs.Utils.FormatMoney(mission.payout), 'success')
         
         FreeGangs.Server.DB.Log(gangName, citizenid, 'smuggle_mission_completed', FreeGangs.LogCategories.ACTIVITY, {
@@ -580,12 +606,20 @@ function FreeGangs.Server.Prison.DeliverContraband(source, targetCitizenId, item
         FreeGangs.Bridge.RemoveItem(source, item.name, item.count or 1)
     end
 
-    -- Store for jailed player to receive
-    ContrabandDeliveries[targetCitizenId] = {
-        items = items,
-        deliveredBy = citizenid,
-        deliveredAt = os.time(),
-    }
+    -- Store for jailed player to receive (append to existing delivery if present)
+    local existing = ContrabandDeliveries[targetCitizenId]
+    if existing then
+        for _, item in ipairs(items) do
+            table.insert(existing.items, item)
+        end
+        existing.deliveredAt = os.time()
+    else
+        ContrabandDeliveries[targetCitizenId] = {
+            items = items,
+            deliveredBy = citizenid,
+            deliveredAt = os.time(),
+        }
+    end
 
     -- Set cooldown
     FreeGangs.Server.SetCooldown(source, cooldownKey, guardConfig.contrabandCooldown)
