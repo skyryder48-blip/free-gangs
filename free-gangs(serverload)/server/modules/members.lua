@@ -689,4 +689,55 @@ CreateThread(function()
     end
 end)
 
+-- ============================================================================
+-- GANG NOTIFICATION HELPERS (on FreeGangs.Server, not FreeGangs.Server.Member)
+-- ============================================================================
+
+---Notify all online members of a gang
+---@param gangName string
+---@param message string
+---@param notifType string|nil
+function FreeGangs.Server.NotifyGangMembers(gangName, message, notifType)
+    if not gangName or not message then return end
+    notifType = notifType or 'inform'
+
+    local onlineMembers = FreeGangs.Server.Member.GetOnlineMembers(gangName)
+    if not onlineMembers then return end
+
+    for _, member in pairs(onlineMembers) do
+        if member.source then
+            TriggerClientEvent('ox_lib:notify', member.source, {
+                title = 'Gang',
+                description = message,
+                type = notifType,
+                duration = 5000,
+            })
+        end
+    end
+end
+
+---Notify all online officers (rank 2+) of a gang
+---@param gangName string
+---@param message string
+---@param notifType string|nil
+function FreeGangs.Server.NotifyGangOfficers(gangName, message, notifType)
+    if not gangName or not message then return end
+    notifType = notifType or 'inform'
+
+    local onlineMembers = FreeGangs.Server.Member.GetOnlineMembers(gangName)
+    if not onlineMembers then return end
+
+    for _, member in pairs(onlineMembers) do
+        -- Officers are rank 2+ (same logic as gang menu isBoss/isOfficer)
+        if member.source and member.rank and member.rank >= 2 then
+            TriggerClientEvent('ox_lib:notify', member.source, {
+                title = 'Gang Officers',
+                description = message,
+                type = notifType,
+                duration = 5000,
+            })
+        end
+    end
+end
+
 return FreeGangs.Server.Member

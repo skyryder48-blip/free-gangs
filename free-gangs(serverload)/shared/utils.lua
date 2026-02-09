@@ -168,6 +168,20 @@ function FreeGangs.Utils.FormatMoney(amount)
 end
 
 -- ============================================================================
+-- ID GENERATION
+-- ============================================================================
+
+---Generate a unique string ID with a given prefix
+---@param prefix string|nil
+---@return string
+function FreeGangs.Utils.GenerateId(prefix)
+    prefix = prefix or 'id'
+    local time = os.time()
+    local random = math.random(100000, 999999)
+    return string.format('%s_%d_%d', prefix, time, random)
+end
+
+-- ============================================================================
 -- MATH UTILITIES
 -- ============================================================================
 

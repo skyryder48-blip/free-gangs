@@ -163,8 +163,9 @@ function FreeGangs.Server.StartBackgroundTasks()
     
     -- Prison influence decay task
     CreateThread(function()
+        local prisonDecayInterval = (FreeGangs.Config.Prison.DecayIntervalHours or 1) * 60 * 60 * 1000
         while true do
-            Wait(3600000) -- Every hour
+            Wait(prisonDecayInterval)
             if FreeGangs.Server.Prison and FreeGangs.Server.Prison.ProcessDecay then
                 FreeGangs.Server.Prison.ProcessDecay()
             end
@@ -558,6 +559,13 @@ AddEventHandler('onResourceStop', function(resourceName)
     if resourceName ~= GetCurrentResourceName() then return end
     
     FreeGangs.Utils.Log('Resource stopping, flushing cache...')
+
+    -- Save prison data before cache flush
+    if FreeGangs.Server.Prison and FreeGangs.Server.Prison.SaveToDatabase then
+        FreeGangs.Server.Prison.SaveToDatabase()
+        FreeGangs.Utils.Log('Saved prison data to database')
+    end
+
     FreeGangs.Server.Cache.Flush(true) -- Force immediate flush
 end)
 
