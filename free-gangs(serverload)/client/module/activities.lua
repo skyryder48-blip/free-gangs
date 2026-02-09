@@ -578,14 +578,9 @@ function FreeGangs.Client.Activities.StartDrugSale(targetPed)
         end
     end
 
-    -- Quantity selection (if player has more than 1)
-    if selectedDrug.count > 1 then
-        local input = lib.inputDialog('Select Quantity', {
-            { type = 'number', label = 'Quantity to sell', default = 1, min = 1, max = math.min(selectedDrug.count, 10) }
-        })
-        if not input then return end
-        selectedQuantity = math.max(1, math.min(math.floor(input[1]), selectedDrug.count, 10))
-    end
+    -- Buyer requests a random amount (capped by player inventory and max 10)
+    local maxBuy = math.min(selectedDrug.count, 10)
+    selectedQuantity = math.random(1, maxBuy)
 
     -- Re-validate target NPC after menus (may have despawned or moved)
     if not DoesEntityExist(targetPed) or IsPedDeadOrDying(targetPed) then
