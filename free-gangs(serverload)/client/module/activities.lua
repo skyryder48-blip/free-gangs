@@ -324,8 +324,7 @@ local function StartMuggingDetection()
             local ped = FreeGangs.Client.GetPlayerPed()
 
             -- State gate: only do expensive NPC scan when eligible
-            if FreeGangs.Client.PlayerGang
-               and not isPerformingActivity
+            if not isPerformingActivity
                and HasMugWeapon()
                and not IsPedInAnyVehicle(ped, false)
                and not IsEntityDead(ped) then
@@ -870,7 +869,6 @@ end
 
 ---Keybind handler: sell drugs to nearest NPC within 1.5 units
 local function OnDrugSaleKeybind()
-    if not FreeGangs.Client.PlayerGang then return end
     if isPerformingActivity then return end
 
     local nearestNPC = GetNearestNPC(1.5)
@@ -894,7 +892,6 @@ function FreeGangs.Client.Activities.SetupTargeting()
             icon = 'fa-solid fa-hand',
             label = 'Pickpocket',
             canInteract = function(entity, distance, coords, name, bone)
-                if not FreeGangs.Client.PlayerGang then return false end
                 if isPerformingActivity then return false end
                 if IsPedAPlayer(entity) then return false end
                 if IsPedDeadOrDying(entity) then return false end
@@ -928,7 +925,6 @@ function FreeGangs.Client.Activities.SetupTargeting()
             icon = 'fa-solid fa-pills',
             label = 'Sell Drugs',
             canInteract = function(entity, distance, coords, name, bone)
-                if not FreeGangs.Client.PlayerGang then return false end
                 if isPerformingActivity then return false end
                 if IsPedAPlayer(entity) then return false end
                 if IsPedDeadOrDying(entity) then return false end
@@ -979,27 +975,13 @@ end
 
 ---Initialize activities module
 function FreeGangs.Client.Activities.Initialize()
-    -- Setup targeting when player is in a gang
-    if FreeGangs.Client.PlayerGang then
-        FreeGangs.Client.Activities.SetupTargeting()
-    end
+    FreeGangs.Client.Activities.SetupTargeting()
 end
 
--- Auto-initialize when gang status changes
-AddEventHandler(FreeGangs.Events.Client.UPDATE_GANG_DATA, function(data)
-    if data and data.gang then
-        FreeGangs.Client.Activities.SetupTargeting()
-    else
-        FreeGangs.Client.Activities.RemoveTargeting()
-    end
-end)
-
--- Initialize on resource start if already in gang
+-- Initialize on resource start (activities available to all players)
 CreateThread(function()
     Wait(2000)
-    if FreeGangs.Client.PlayerGang then
-        FreeGangs.Client.Activities.SetupTargeting()
-    end
+    FreeGangs.Client.Activities.SetupTargeting()
 end)
 
 return FreeGangs.Client.Activities

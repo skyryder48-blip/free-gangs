@@ -24,26 +24,20 @@ lib.callback.register(FreeGangs.Callbacks.CAN_PERFORM_ACTIVITY, function(source,
         return false, FreeGangs.L('errors', 'not_loaded')
     end
     
-    -- Check gang membership
-    local gangData = FreeGangs.Server.GetPlayerGangData(source)
-    if not gangData then
-        return false, FreeGangs.L('gangs', 'not_in_gang')
-    end
-    
     if activity == 'mugging' then
-        -- Check cooldown
+        -- Available to all players
         local cooldownRemaining = FreeGangs.Server.GetCooldownRemaining(source, 'mugging')
         if cooldownRemaining > 0 then
             return false, FreeGangs.L('activities', 'on_cooldown', FreeGangs.Utils.FormatDuration(cooldownRemaining * 1000))
         end
         return true
-        
+
     elseif activity == 'pickpocket' then
-        -- No player cooldown for pickpocketing, only NPC cooldown (validated on completion)
+        -- Available to all players
         return true
-        
+
     elseif activity == 'drug_sale' then
-        -- Check player cooldown
+        -- Available to all players
         local drugCooldown = FreeGangs.Server.GetCooldownRemaining(source, 'drug_sale')
         if drugCooldown > 0 then
             return false, FreeGangs.L('activities', 'on_cooldown', FreeGangs.Utils.FormatDuration(drugCooldown * 1000))
@@ -65,16 +59,24 @@ lib.callback.register(FreeGangs.Callbacks.CAN_PERFORM_ACTIVITY, function(source,
             return false, FreeGangs.L('activities', 'drug_sale_wrong_time')
         end
         return true
-        
+
     elseif activity == 'protection_collect' then
-        -- Check permission
+        -- Gang members only
+        local gangData = FreeGangs.Server.GetPlayerGangData(source)
+        if not gangData then
+            return false, FreeGangs.L('gangs', 'not_in_gang')
+        end
         if not FreeGangs.Server.HasPermission(source, FreeGangs.Permissions.COLLECT_PROTECTION) then
             return false, FreeGangs.L('activities', 'protection_no_permission')
         end
         return true
-        
+
     elseif activity == 'graffiti' then
-        -- Check for spray can
+        -- Gang members only
+        local gangData = FreeGangs.Server.GetPlayerGangData(source)
+        if not gangData then
+            return false, FreeGangs.L('gangs', 'not_in_gang')
+        end
         local sprayCanItem = FreeGangs.Config.Activities.Graffiti and
                             FreeGangs.Config.Activities.Graffiti.RequiredItem or 'spray_can'
         if not FreeGangs.Bridge.HasItem(source, sprayCanItem, 1) then
@@ -116,9 +118,6 @@ lib.callback.register('freegangs:activities:validateMugTarget', function(source,
 
     local citizenid = FreeGangs.Bridge.GetCitizenId(source)
     if not citizenid then return false, 'Not loaded' end
-
-    local gangData = FreeGangs.Server.GetPlayerGangData(source)
-    if not gangData then return false, 'Not in gang' end
 
     -- Check player cooldown
     local cooldownRemaining = FreeGangs.Server.GetCooldownRemaining(source, 'mugging')
@@ -172,9 +171,6 @@ lib.callback.register('freegangs:activities:validatePickpocketTarget', function(
     local citizenid = FreeGangs.Bridge.GetCitizenId(source)
     if not citizenid then return false, 'Not loaded' end
 
-    local gangData = FreeGangs.Server.GetPlayerGangData(source)
-    if not gangData then return false, 'Not in gang' end
-
     -- Check player cooldown
     local cooldownRemaining = FreeGangs.Server.GetCooldownRemaining(source, 'pickpocket')
     if cooldownRemaining > 0 then
@@ -222,10 +218,6 @@ end)
 lib.callback.register('freegangs:activities:getDrugInventory', function(source)
     local citizenid = FreeGangs.Bridge.GetCitizenId(source)
     if not citizenid then return {} end
-
-    -- Check gang membership
-    local gangData = FreeGangs.Server.GetPlayerGangData(source)
-    if not gangData then return {} end
 
     -- Use SellableDrugs from config (array of item names)
     local sellableDrugs = FreeGangs.Config.Activities.DrugSales and
