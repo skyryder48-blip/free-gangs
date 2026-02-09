@@ -22,6 +22,7 @@ local muggingThreadActive = false
 local currentMugTarget = nil
 local recentMugTargets = {}          -- ped -> gameTimer of last attempt
 local MUG_RETRIGGER_COOLDOWN = 10000 -- 10 seconds before can auto-mug same NPC again
+local blacklistedPedHashes = nil     -- lazily built hash set from config
 
 -- ============================================================================
 -- UTILITY FUNCTIONS
@@ -37,6 +38,22 @@ end
 ---@param busy boolean
 local function SetBusy(busy)
     isPerformingActivity = busy
+end
+
+---Check if a ped model is blacklisted for drug sales (law enforcement, military, etc.)
+---@param ped number Ped handle
+---@return boolean
+local function IsBlacklistedPed(ped)
+    -- Build hash set on first use
+    if not blacklistedPedHashes then
+        blacklistedPedHashes = {}
+        local models = FreeGangs.Config.Activities.DrugSales
+            and FreeGangs.Config.Activities.DrugSales.BlacklistedPedModels or {}
+        for _, model in ipairs(models) do
+            blacklistedPedHashes[GetHashKey(model)] = true
+        end
+    end
+    return blacklistedPedHashes[GetEntityModel(ped)] == true
 end
 
 ---Check if player has a weapon that can be used for mugging
@@ -524,6 +541,15 @@ function FreeGangs.Client.Activities.StartDrugSale(targetPed)
     local ped = FreeGangs.Client.GetPlayerPed()
     if IsPedInAnyVehicle(ped, false) or IsEntityDead(ped) then return end
 
+    -- Blacklisted ped check (law enforcement, military, etc.) - alerts police
+    if IsBlacklistedPed(targetPed) then
+        FreeGangs.Bridge.Notify('This person is not a buyer', 'error')
+        local wantedLevel = FreeGangs.Config.Activities.DrugSales.BlacklistedPedWantedLevel or 2
+        SetPlayerWantedLevel(PlayerId(), wantedLevel, false)
+        SetPlayerWantedLevelNow(PlayerId(), false)
+        return
+    end
+
     -- Check time restriction
     if not IsDrugSaleTime() then
         FreeGangs.Bridge.Notify(FreeGangs.L('activities', 'drug_sale_wrong_time'), 'error')
@@ -830,7 +856,7 @@ local function GetNearestNPC(maxDist)
     local closestDist = maxDist
 
     for _, npc in ipairs(GetGamePool('CPed')) do
-        if npc ~= ped and not IsPedAPlayer(npc) and not IsPedDeadOrDying(npc) then
+        if npc ~= ped and not IsPedAPlayer(npc) and not IsPedDeadOrDying(npc) and not IsBlacklistedPed(npc) then
             local dist = #(playerCoords - GetEntityCoords(npc))
             if dist < closestDist then
                 closestDist = dist
@@ -907,6 +933,7 @@ function FreeGangs.Client.Activities.SetupTargeting()
                 if IsPedAPlayer(entity) then return false end
                 if IsPedDeadOrDying(entity) then return false end
                 if not IsDrugSaleTime() then return false end
+                if IsBlacklistedPed(entity) then return false end
                 return true
             end,
             onSelect = function(data)

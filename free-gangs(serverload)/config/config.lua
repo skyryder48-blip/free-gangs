@@ -302,6 +302,50 @@ FreeGangs.Config.Activities = {
             'lsd',
             'ecstasy',
         },
+
+        -- Ped models that always deny sales and alert police
+        -- Law enforcement, emergency services, military, security
+        BlacklistedPedModels = {
+            -- Police
+            's_m_y_cop_01',
+            's_f_y_cop_01',
+            's_m_y_hwaycop_01',
+            's_m_y_sheriff_01',
+            's_f_y_sheriff_01',
+            's_m_y_ranger_01',
+            's_m_y_swat_01',
+            'csb_cop',
+            -- Federal
+            's_m_m_ciasec_01',
+            's_m_m_fibsec_01',
+            's_m_m_fiboffice_01',
+            's_m_m_fiboffice_02',
+            'csb_agent',
+            -- Military
+            's_m_y_marine_01',
+            's_m_y_marine_02',
+            's_m_y_marine_03',
+            's_m_m_marine_01',
+            's_m_m_marine_02',
+            's_m_y_armymech_01',
+            's_m_y_pilot_01',
+            -- Emergency services
+            's_m_y_fireman_01',
+            's_m_m_paramedic_01',
+            -- Prison
+            's_m_m_prisguard_01',
+            -- Security
+            's_m_m_security_01',
+            's_m_m_bouncer_01',
+            's_m_m_armoured_01',
+            's_m_m_armoured_02',
+            's_m_y_blackops_01',
+            's_m_y_blackops_02',
+            's_m_y_blackops_03',
+        },
+
+        -- Wanted level applied when trying to sell to a blacklisted ped
+        BlacklistedPedWantedLevel = 2,
     },
     
     -- Graffiti
