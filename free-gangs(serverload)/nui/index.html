@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>FREE-GANGS - Gang Operations</title>
+    <title>FREE-GANGS - Criminal Operations</title>
     <link rel="stylesheet" href="css/style.css">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -11,164 +11,300 @@
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
 </head>
 <body>
+    <!-- Ambient scanline overlay -->
+    <div class="scanline-overlay"></div>
+
     <!-- Main Container -->
     <div id="gang-ui" class="hidden">
         <!-- Header Bar -->
         <header class="gang-header">
             <div class="header-left">
                 <div class="gang-emblem" id="gangEmblem">
-                    <i class="fas fa-skull"></i>
+                    <i class="fas fa-skull" id="emblemIcon"></i>
                 </div>
                 <div class="gang-info">
-                    <h1 class="gang-name" id="gangName">Gang Operations</h1>
-                    <span class="gang-archetype" id="gangArchetype">Organization</span>
+                    <h1 class="gang-name" id="gangName">The Underworld</h1>
+                    <span class="gang-archetype" id="gangArchetype">Criminal Network</span>
                 </div>
             </div>
             <div class="header-right">
-                <div class="stat-badge">
+                <div class="stat-badge level-badge">
                     <i class="fas fa-star"></i>
                     <span id="gangLevel">Level 1</span>
                 </div>
-                <div class="stat-badge treasury">
+                <div class="stat-badge treasury-badge">
                     <i class="fas fa-coins"></i>
                     <span id="gangTreasury">$0</span>
                 </div>
-                <button class="close-btn" id="closeBtn">
+                <div class="header-heat-pip" id="headerHeatPip" title="Gang Heat">
+                    <i class="fas fa-fire"></i>
+                    <span id="headerHeatLabel">Neutral</span>
+                </div>
+                <button class="close-btn" id="closeBtn" title="Close">
                     <i class="fas fa-times"></i>
                 </button>
             </div>
         </header>
 
         <!-- Navigation Tabs -->
-        <nav class="gang-nav">
+        <nav class="gang-nav" id="gangNav">
             <button class="nav-tab active" data-tab="dashboard">
                 <i class="fas fa-tachometer-alt"></i>
                 <span>Dashboard</span>
             </button>
-            <button class="nav-tab" data-tab="members">
-                <i class="fas fa-users"></i>
-                <span>Members</span>
+            <button class="nav-tab gang-only" data-tab="operations">
+                <i class="fas fa-mask"></i>
+                <span>Operations</span>
             </button>
             <button class="nav-tab" data-tab="territories">
                 <i class="fas fa-map-marked-alt"></i>
                 <span>Territories</span>
             </button>
-            <button class="nav-tab" data-tab="wars">
-                <i class="fas fa-crosshairs"></i>
-                <span>Wars</span>
+            <button class="nav-tab gang-only" data-tab="members">
+                <i class="fas fa-users"></i>
+                <span>Members</span>
             </button>
-            <button class="nav-tab" data-tab="treasury">
+            <button class="nav-tab gang-only" data-tab="wars">
+                <i class="fas fa-crosshairs"></i>
+                <span>Wars & Heat</span>
+            </button>
+            <button class="nav-tab officer-only" data-tab="contacts">
+                <i class="fas fa-address-book"></i>
+                <span>Contacts</span>
+            </button>
+            <button class="nav-tab gang-only" data-tab="treasury">
                 <i class="fas fa-vault"></i>
                 <span>Treasury</span>
+            </button>
+            <button class="nav-tab boss-only" data-tab="settings">
+                <i class="fas fa-cog"></i>
+                <span>Settings</span>
             </button>
         </nav>
 
         <!-- Content Area -->
         <main class="gang-content">
-            <!-- Dashboard Tab -->
+
+            <!-- ============================================================ -->
+            <!-- DASHBOARD TAB -->
+            <!-- ============================================================ -->
             <section class="tab-content active" id="dashboard-tab">
-                <div class="dashboard-grid">
-                    <!-- Stats Cards -->
-                    <div class="stat-card">
-                        <div class="stat-icon">
-                            <i class="fas fa-trophy"></i>
+                <!-- Stat Gauges Row -->
+                <div class="gauge-row" id="dashboardGauges">
+                    <div class="gauge-card">
+                        <div class="gauge-ring" data-gauge="rep">
+                            <svg viewBox="0 0 100 100">
+                                <circle class="gauge-bg" cx="50" cy="50" r="42"/>
+                                <circle class="gauge-fill gold" cx="50" cy="50" r="42" id="gaugeRep"/>
+                            </svg>
+                            <div class="gauge-center">
+                                <span class="gauge-value" id="gaugeRepValue">0</span>
+                                <span class="gauge-label">Rep</span>
+                            </div>
                         </div>
-                        <div class="stat-info">
-                            <span class="stat-label">Reputation</span>
-                            <span class="stat-value" id="statRep">0</span>
-                        </div>
-                        <div class="stat-progress">
-                            <div class="progress-bar" id="repProgress" style="width: 0%"></div>
-                        </div>
+                        <span class="gauge-sublabel" id="gaugeRepLevel">Level 1</span>
                     </div>
-
-                    <div class="stat-card">
-                        <div class="stat-icon">
-                            <i class="fas fa-users"></i>
+                    <div class="gauge-card">
+                        <div class="gauge-ring" data-gauge="members">
+                            <svg viewBox="0 0 100 100">
+                                <circle class="gauge-bg" cx="50" cy="50" r="42"/>
+                                <circle class="gauge-fill blue" cx="50" cy="50" r="42" id="gaugeMembers"/>
+                            </svg>
+                            <div class="gauge-center">
+                                <span class="gauge-value" id="gaugeMembersValue">0</span>
+                                <span class="gauge-label">Members</span>
+                            </div>
                         </div>
-                        <div class="stat-info">
-                            <span class="stat-label">Members</span>
-                            <span class="stat-value" id="statMembers">0</span>
-                        </div>
-                        <div class="stat-detail">
-                            <span id="membersOnline">0</span> online
-                        </div>
+                        <span class="gauge-sublabel" id="gaugeMembersOnline">0 online</span>
                     </div>
-
-                    <div class="stat-card">
-                        <div class="stat-icon">
-                            <i class="fas fa-map"></i>
+                    <div class="gauge-card">
+                        <div class="gauge-ring" data-gauge="territories">
+                            <svg viewBox="0 0 100 100">
+                                <circle class="gauge-bg" cx="50" cy="50" r="42"/>
+                                <circle class="gauge-fill green" cx="50" cy="50" r="42" id="gaugeTerritories"/>
+                            </svg>
+                            <div class="gauge-center">
+                                <span class="gauge-value" id="gaugeTerrValue">0</span>
+                                <span class="gauge-label">Turf</span>
+                            </div>
                         </div>
-                        <div class="stat-info">
-                            <span class="stat-label">Territories</span>
-                            <span class="stat-value" id="statTerritories">0</span>
-                        </div>
-                        <div class="stat-detail">
-                            <span id="maxTerritories">0</span> max
-                        </div>
+                        <span class="gauge-sublabel" id="gaugeTerrMax">/ 1 max</span>
                     </div>
-
-                    <div class="stat-card">
-                        <div class="stat-icon heat">
-                            <i class="fas fa-fire"></i>
+                    <div class="gauge-card">
+                        <div class="gauge-ring" data-gauge="heat">
+                            <svg viewBox="0 0 100 100">
+                                <circle class="gauge-bg" cx="50" cy="50" r="42"/>
+                                <circle class="gauge-fill red" cx="50" cy="50" r="42" id="gaugeHeat"/>
+                            </svg>
+                            <div class="gauge-center">
+                                <span class="gauge-value" id="gaugeHeatValue">0</span>
+                                <span class="gauge-label">Rivals</span>
+                            </div>
                         </div>
-                        <div class="stat-info">
-                            <span class="stat-label">Active Rivalries</span>
-                            <span class="stat-value" id="statRivalries">0</span>
-                        </div>
+                        <span class="gauge-sublabel" id="gaugeHeatStage">Neutral</span>
                     </div>
+                </div>
 
-                    <!-- Recent Activity Feed -->
-                    <div class="activity-feed">
-                        <h3><i class="fas fa-clock"></i> Recent Activity</h3>
-                        <ul id="activityList">
-                            <li class="activity-item">
-                                <span class="activity-icon"><i class="fas fa-check-circle"></i></span>
+                <div class="dashboard-bottom">
+                    <!-- Activity Feed -->
+                    <div class="panel activity-feed">
+                        <div class="panel-header">
+                            <i class="fas fa-clock"></i>
+                            <h3>Recent Activity</h3>
+                        </div>
+                        <ul class="activity-list" id="activityList">
+                            <li class="activity-item empty">
                                 <span class="activity-text">No recent activity</span>
-                                <span class="activity-time">-</span>
                             </li>
                         </ul>
                     </div>
 
                     <!-- Quick Actions -->
-                    <div class="quick-actions">
-                        <h3><i class="fas fa-bolt"></i> Quick Actions</h3>
-                        <div class="action-buttons">
-                            <button class="action-btn" id="btnInvite">
+                    <div class="panel quick-actions">
+                        <div class="panel-header">
+                            <i class="fas fa-bolt"></i>
+                            <h3>Quick Actions</h3>
+                        </div>
+                        <div class="action-grid" id="quickActions">
+                            <button class="action-btn gang-only" id="btnInvite">
                                 <i class="fas fa-user-plus"></i>
-                                Invite Member
+                                <span>Invite</span>
                             </button>
-                            <button class="action-btn" id="btnDeposit">
+                            <button class="action-btn gang-only" id="btnDeposit">
                                 <i class="fas fa-money-bill-wave"></i>
-                                Deposit
+                                <span>Deposit</span>
                             </button>
-                            <button class="action-btn" id="btnStash">
+                            <button class="action-btn gang-only" id="btnStash">
                                 <i class="fas fa-box"></i>
-                                Open Stash
+                                <span>Stash</span>
+                            </button>
+                            <button class="action-btn gang-only" id="btnWarChest">
+                                <i class="fas fa-crosshairs"></i>
+                                <span>War Chest</span>
                             </button>
                         </div>
                     </div>
                 </div>
             </section>
 
-            <!-- Members Tab -->
-            <section class="tab-content" id="members-tab">
-                <div class="members-header">
-                    <h2>Member Roster</h2>
-                    <div class="member-search">
-                        <i class="fas fa-search"></i>
-                        <input type="text" id="memberSearch" placeholder="Search members...">
+            <!-- ============================================================ -->
+            <!-- OPERATIONS TAB (Gang Only) -->
+            <!-- ============================================================ -->
+            <section class="tab-content" id="operations-tab">
+                <div class="operations-header">
+                    <h2><i class="fas fa-mask"></i> Criminal Operations</h2>
+                    <div class="zone-indicator" id="opsZoneIndicator">
+                        <i class="fas fa-map-pin"></i>
+                        <span id="opsCurrentZone">No Zone</span>
+                        <span class="zone-control" id="opsZoneControl">0%</span>
                     </div>
                 </div>
-                <div class="members-list" id="membersList">
-                    <!-- Members will be populated dynamically -->
+
+                <!-- Activity Cooldowns -->
+                <div class="cooldowns-bar" id="cooldownsBar">
+                    <!-- Populated dynamically -->
+                </div>
+
+                <!-- Operations Grid -->
+                <div class="operations-grid" id="operationsGrid">
+                    <!-- Protection Racket Card -->
+                    <div class="op-card" data-op="protection">
+                        <div class="op-card-header">
+                            <div class="op-icon"><i class="fas fa-shield-alt"></i></div>
+                            <div class="op-title">
+                                <h4>Protection Racket</h4>
+                                <span class="op-subtitle">Extort local businesses</span>
+                            </div>
+                            <span class="op-badge" id="protectionCount">0</span>
+                        </div>
+                        <div class="op-card-body" id="protectionList">
+                            <p class="op-empty">No businesses under protection</p>
+                        </div>
+                    </div>
+
+                    <!-- Robbery Card -->
+                    <div class="op-card robbery" data-op="robbery">
+                        <div class="op-card-header">
+                            <div class="op-icon danger"><i class="fas fa-hand-holding-dollar"></i></div>
+                            <div class="op-title">
+                                <h4>Rob Rivals</h4>
+                                <span class="op-subtitle">Hit rival protection (30%+ control)</span>
+                            </div>
+                            <span class="op-badge danger" id="robberyCount">0</span>
+                        </div>
+                        <div class="op-card-body" id="robberyTargets">
+                            <p class="op-empty">No robbery targets available</p>
+                        </div>
+                    </div>
+
+                    <!-- Drug Sales Card -->
+                    <div class="op-card" data-op="drugs">
+                        <div class="op-card-header">
+                            <div class="op-icon"><i class="fas fa-cannabis"></i></div>
+                            <div class="op-title">
+                                <h4>Drug Trade</h4>
+                                <span class="op-subtitle">Street-level distribution</span>
+                            </div>
+                        </div>
+                        <div class="op-card-body" id="drugStats">
+                            <div class="op-stat-row">
+                                <span>Sales Today</span>
+                                <span class="op-stat-value" id="drugSalesToday">0</span>
+                            </div>
+                            <div class="op-stat-row">
+                                <span>Revenue</span>
+                                <span class="op-stat-value" id="drugRevenue">$0</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Street Crime Card -->
+                    <div class="op-card" data-op="street">
+                        <div class="op-card-header">
+                            <div class="op-icon"><i class="fas fa-user-ninja"></i></div>
+                            <div class="op-title">
+                                <h4>Street Crime</h4>
+                                <span class="op-subtitle">Mugging & pickpocketing</span>
+                            </div>
+                        </div>
+                        <div class="op-card-body" id="streetStats">
+                            <div class="op-stat-row">
+                                <span>Muggings</span>
+                                <span class="op-stat-value" id="muggingCount">0</span>
+                            </div>
+                            <div class="op-stat-row">
+                                <span>Pickpockets</span>
+                                <span class="op-stat-value" id="pickpocketCount">0</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Graffiti Card -->
+                    <div class="op-card" data-op="graffiti">
+                        <div class="op-card-header">
+                            <div class="op-icon"><i class="fas fa-spray-can"></i></div>
+                            <div class="op-title">
+                                <h4>Graffiti</h4>
+                                <span class="op-subtitle">Tag territory</span>
+                            </div>
+                            <span class="op-badge" id="graffitiCount">0</span>
+                        </div>
+                        <div class="op-card-body" id="graffitiStats">
+                            <div class="op-stat-row">
+                                <span>Active Tags</span>
+                                <span class="op-stat-value" id="activeTags">0</span>
+                            </div>
+                        </div>
+                    </div>
                 </div>
             </section>
 
-            <!-- Territories Tab -->
+            <!-- ============================================================ -->
+            <!-- TERRITORIES TAB -->
+            <!-- ============================================================ -->
             <section class="tab-content" id="territories-tab">
                 <div class="territories-header">
-                    <h2>Territory Control</h2>
+                    <h2><i class="fas fa-map-marked-alt"></i> Territory Control</h2>
                     <div class="territory-legend">
                         <span class="legend-item controlled"><i class="fas fa-crown"></i> Controlled</span>
                         <span class="legend-item contested"><i class="fas fa-exclamation-triangle"></i> Contested</span>
@@ -176,17 +312,37 @@
                     </div>
                 </div>
                 <div class="territories-grid" id="territoriesList">
-                    <!-- Territories will be populated dynamically -->
+                    <!-- Populated dynamically -->
                 </div>
             </section>
 
-            <!-- Wars Tab -->
+            <!-- ============================================================ -->
+            <!-- MEMBERS TAB (Gang Only) -->
+            <!-- ============================================================ -->
+            <section class="tab-content" id="members-tab">
+                <div class="members-header">
+                    <h2><i class="fas fa-users"></i> Member Roster</h2>
+                    <div class="members-controls">
+                        <div class="member-search">
+                            <i class="fas fa-search"></i>
+                            <input type="text" id="memberSearch" placeholder="Search members...">
+                        </div>
+                        <div class="member-count" id="memberCountBadge">0 members</div>
+                    </div>
+                </div>
+                <div class="members-list" id="membersList">
+                    <!-- Populated dynamically -->
+                </div>
+            </section>
+
+            <!-- ============================================================ -->
+            <!-- WARS & HEAT TAB (Gang Only) -->
+            <!-- ============================================================ -->
             <section class="tab-content" id="wars-tab">
                 <div class="wars-section">
                     <h2><i class="fas fa-skull-crossbones"></i> Active Wars</h2>
                     <div class="wars-list" id="activeWarsList">
-                        <!-- Active wars will be populated dynamically -->
-                        <div class="no-wars">
+                        <div class="no-data-block">
                             <i class="fas fa-peace"></i>
                             <p>No active wars</p>
                         </div>
@@ -196,12 +352,33 @@
                 <div class="heat-section">
                     <h2><i class="fas fa-fire"></i> Heat Levels</h2>
                     <div class="heat-list" id="heatList">
-                        <!-- Heat levels will be populated dynamically -->
+                        <div class="no-data-block">
+                            <i class="fas fa-handshake"></i>
+                            <p>No rivalries</p>
+                        </div>
                     </div>
                 </div>
             </section>
 
-            <!-- Treasury Tab -->
+            <!-- ============================================================ -->
+            <!-- CONTACTS TAB (Officer+ Only) -->
+            <!-- ============================================================ -->
+            <section class="tab-content" id="contacts-tab">
+                <div class="contacts-header">
+                    <h2><i class="fas fa-address-book"></i> Corrupt Contacts</h2>
+                    <div class="contacts-budget">
+                        <span>Weekly Expense:</span>
+                        <span class="budget-value" id="weeklyBribeExpense">$0</span>
+                    </div>
+                </div>
+                <div class="contacts-grid" id="contactsList">
+                    <!-- Populated dynamically -->
+                </div>
+            </section>
+
+            <!-- ============================================================ -->
+            <!-- TREASURY TAB (Gang Only) -->
+            <!-- ============================================================ -->
             <section class="tab-content" id="treasury-tab">
                 <div class="treasury-overview">
                     <div class="treasury-card main">
@@ -238,24 +415,81 @@
                     </div>
                 </div>
 
-                <div class="transaction-history">
-                    <h3><i class="fas fa-receipt"></i> Transaction History</h3>
-                    <ul id="transactionList">
-                        <li class="transaction-item">
-                            <span class="no-transactions">No recent transactions</span>
+                <div class="panel transaction-history">
+                    <div class="panel-header">
+                        <i class="fas fa-receipt"></i>
+                        <h3>Transaction History</h3>
+                    </div>
+                    <ul class="transaction-list" id="transactionList">
+                        <li class="transaction-item empty">
+                            <span>No recent transactions</span>
                         </li>
                     </ul>
                 </div>
             </section>
+
+            <!-- ============================================================ -->
+            <!-- SETTINGS TAB (Boss Only) -->
+            <!-- ============================================================ -->
+            <section class="tab-content" id="settings-tab">
+                <div class="settings-header">
+                    <h2><i class="fas fa-cog"></i> Gang Settings</h2>
+                    <span class="settings-subtitle">Boss Access Only</span>
+                </div>
+                <div class="settings-grid">
+                    <div class="settings-card">
+                        <div class="settings-card-header">
+                            <i class="fas fa-pen"></i>
+                            <h4>Gang Identity</h4>
+                        </div>
+                        <div class="settings-card-body">
+                            <div class="setting-row">
+                                <label>Gang Name</label>
+                                <span class="setting-value" id="settingGangName">-</span>
+                            </div>
+                            <div class="setting-row">
+                                <label>Archetype</label>
+                                <span class="setting-value" id="settingArchetype">-</span>
+                            </div>
+                            <div class="setting-row">
+                                <label>Level</label>
+                                <span class="setting-value" id="settingLevel">-</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="settings-card">
+                        <div class="settings-card-header">
+                            <i class="fas fa-list-ol"></i>
+                            <h4>Rank Structure</h4>
+                        </div>
+                        <div class="settings-card-body" id="ranksList">
+                            <!-- Populated dynamically -->
+                        </div>
+                    </div>
+                    <div class="settings-card full-width">
+                        <div class="settings-card-header">
+                            <i class="fas fa-box-open"></i>
+                            <h4>Gang Stash</h4>
+                        </div>
+                        <div class="settings-card-body">
+                            <button class="action-btn" id="btnOpenStash">
+                                <i class="fas fa-box"></i>
+                                <span>Open Gang Stash</span>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
         </main>
 
         <!-- Footer -->
         <footer class="gang-footer">
             <span class="footer-text">
-                <i class="fas fa-skull"></i> 
+                <i class="fas fa-skull"></i>
                 The family that rules together, stays together.
             </span>
-            <span class="version">v1.0.0</span>
+            <span class="version">v2.0</span>
         </footer>
     </div>
 
@@ -263,14 +497,12 @@
     <div id="modalOverlay" class="modal-overlay hidden">
         <div class="modal" id="modal">
             <div class="modal-header">
-                <h3 id="modalTitle">Modal Title</h3>
+                <h3 id="modalTitle">Confirm</h3>
                 <button class="modal-close" id="modalClose">
                     <i class="fas fa-times"></i>
                 </button>
             </div>
-            <div class="modal-body" id="modalBody">
-                <!-- Modal content -->
-            </div>
+            <div class="modal-body" id="modalBody"></div>
             <div class="modal-footer" id="modalFooter">
                 <button class="modal-btn cancel" id="modalCancel">Cancel</button>
                 <button class="modal-btn confirm" id="modalConfirm">Confirm</button>

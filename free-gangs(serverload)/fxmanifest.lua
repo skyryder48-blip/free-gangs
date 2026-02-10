@@ -91,6 +91,7 @@ client_scripts {
     'client/ui/menus.lua',
     'client/ui/inputs.lua',
     'client/ui/notifications.lua',
+    'client/ui/nui.lua',
     
     -- Main initialization (last)
     'client/main.lua',
