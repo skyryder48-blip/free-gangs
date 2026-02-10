@@ -40,10 +40,7 @@ local function Initialize()
 
     -- Request initial data from server
     FreeGangs.Client.RequestInitialData()
-    
-    -- Initialize zones
-    FreeGangs.Client.InitializeZones()
-    
+
     -- Start background threads
     FreeGangs.Client.StartBackgroundTasks()
     
@@ -237,17 +234,9 @@ end
 
 ---Start background threads
 function FreeGangs.Client.StartBackgroundTasks()
-    -- Presence tick thread
-    CreateThread(function()
-        while true do
-            Wait(FreeGangs.Config.Territory.PresenceTickMinutes * 60 * 1000)
-            
-            if FreeGangs.Client.CurrentZone and FreeGangs.Client.PlayerGang then
-                TriggerServerEvent(FreeGangs.Events.Server.PRESENCE_TICK, FreeGangs.Client.CurrentZone.name)
-            end
-        end
-    end)
-    
+    -- NOTE: Presence tick is handled server-side by StartPresenceThread().
+    -- Do NOT add a client-side presence tick thread here.
+
     -- Ped cache update
     CreateThread(function()
         while true do

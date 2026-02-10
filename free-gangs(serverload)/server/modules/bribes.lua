@@ -389,7 +389,7 @@ function FreeGangs.Server.Bribes.Establish(source, gangName, contactType)
     FreeGangs.Server.PendingBribes[pendingKey] = nil
     
     -- Add reputation
-    FreeGangs.Server.Reputation.AddReputation(gangName, 25, 'Established bribe contact')
+    FreeGangs.Server.Reputation.Add(gangName, 25, 'bribe_established')
     
     -- Log
     FreeGangs.Server.DB.Log(gangName, citizenid, 'bribe_established', FreeGangs.LogCategories.BRIBE, {

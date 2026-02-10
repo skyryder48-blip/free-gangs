@@ -105,7 +105,7 @@ lib.callback.register('free-gangs:callback:declareWar', function(source, defende
     end
     
     -- Verify permission (must be boss/officer)
-    local hasPermission = FreeGangs.Server.Members.HasPermission(
+    local hasPermission = FreeGangs.Server.Member.HasPermission(
         member.gang_name, 
         citizenId, 
         FreeGangs.Permissions.DECLARE_WAR
@@ -142,7 +142,7 @@ lib.callback.register('free-gangs:callback:acceptWar', function(source, warId, m
     end
     
     -- Verify permission (must be boss/officer)
-    local hasPermission = FreeGangs.Server.Members.HasPermission(
+    local hasPermission = FreeGangs.Server.Member.HasPermission(
         member.gang_name, 
         citizenId, 
         FreeGangs.Permissions.ACCEPT_WAR
@@ -185,7 +185,7 @@ lib.callback.register('free-gangs:callback:declineWar', function(source, warId)
     end
     
     -- Verify permission (must be boss/officer)
-    local hasPermission = FreeGangs.Server.Members.HasPermission(
+    local hasPermission = FreeGangs.Server.Member.HasPermission(
         member.gang_name, 
         citizenId, 
         FreeGangs.Permissions.DECLINE_WAR
@@ -219,7 +219,7 @@ lib.callback.register('free-gangs:callback:surrenderWar', function(source, warId
     end
     
     -- Verify permission (boss only for surrender)
-    local hasPermission = FreeGangs.Server.Members.HasPermission(
+    local hasPermission = FreeGangs.Server.Member.HasPermission(
         member.gang_name, 
         citizenId, 
         FreeGangs.Permissions.SURRENDER_WAR
@@ -253,7 +253,7 @@ lib.callback.register('free-gangs:callback:requestPeace', function(source, warId
     end
     
     -- Verify permission (boss only for peace requests)
-    local hasPermission = FreeGangs.Server.Members.HasPermission(
+    local hasPermission = FreeGangs.Server.Member.HasPermission(
         member.gang_name, 
         citizenId, 
         FreeGangs.Permissions.REQUEST_PEACE

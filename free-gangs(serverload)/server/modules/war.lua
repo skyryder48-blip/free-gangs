@@ -442,7 +442,7 @@ function FreeGangs.Server.War.End(warId, winner, reason)
         -- Award reputation to winner
         local repGain = FreeGangs.Utils.CalculateActivityPoints(FreeGangs.Activities.WAR_VICTORY, winnerData.archetype)
         if repGain and repGain.masterRep > 0 then
-            FreeGangs.Server.AddReputation(winner, repGain.masterRep, 'war_victory')
+            FreeGangs.Server.Reputation.Add(winner, repGain.masterRep, 'war_victory')
         end
     else
         -- Cancelled - return collateral

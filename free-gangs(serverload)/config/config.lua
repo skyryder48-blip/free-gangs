@@ -1101,6 +1101,26 @@ FreeGangs.Config.Prison = {
         -- Cooldown between missions (seconds)
         Cooldown = 1800, -- 30 minutes
     },
+
+    -- Decay settings
+    DecayAmount = 1,                     -- Base influence decay per cycle
+    DecayIntervalHours = 1,              -- Hours between decay cycles
+    PassiveInfluencePerMember = 0.5,     -- Influence gained per jailed member per cycle
+
+    -- Contraband
+    ContrabandExpiryHours = 24,          -- Hours before unclaimed contraband expires
+
+    -- Escape
+    EscapeCooldownMs = 3600000,          -- Cooldown between escape attempts (ms)
+
+    -- Escape mission settings (client-side)
+    EscapeMission = {
+        TimerSeconds = 900,              -- 15 minutes to complete escape
+        ExtractionRadius = 15.0,         -- Radius of extraction zone
+        SafehouseRadius = 25.0,          -- Radius of safehouse arrival zone
+        BreakoutDurationMs = 15000,      -- Progress bar duration for breakout
+        WantedLevel = 3,                 -- Wanted level during escape
+    },
 }
 
 -- ============================================================================
