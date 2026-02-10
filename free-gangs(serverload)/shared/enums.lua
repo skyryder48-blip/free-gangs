@@ -501,6 +501,7 @@ FreeGangs.Activities = {
     PROTECTION_COLLECT = 'protection_collect',
     PROTECTION_REGISTER = 'protection_register',
     PROTECTION_TAKEOVER = 'protection_takeover',
+    PROTECTION_ROBBERY = 'protection_robbery',
     ZONE_PRESENCE = 'zone_presence',
     RIVAL_KILL = 'rival_kill',
     BRIBE_USE = 'bribe_use',
@@ -560,6 +561,11 @@ FreeGangs.ActivityPoints = {
         masterRep = 35,
         zoneInfluence = 25,
         heat = 20,
+    },
+    [FreeGangs.Activities.PROTECTION_ROBBERY] = {
+        masterRep = 40,
+        zoneInfluence = 20,
+        heat = 30,
     },
     [FreeGangs.Activities.ZONE_PRESENCE] = {
         masterRep = 0,

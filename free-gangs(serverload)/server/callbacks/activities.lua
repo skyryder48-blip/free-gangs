@@ -73,6 +73,21 @@ lib.callback.register(FreeGangs.Callbacks.CAN_PERFORM_ACTIVITY, function(source,
         end
         return true
 
+    elseif activity == 'protection_robbery' then
+        -- Gang members only, requires protection permission
+        local gangData = FreeGangs.Server.GetPlayerGangData(source)
+        if not gangData then
+            return false, FreeGangs.L('gangs', 'not_in_gang')
+        end
+        if not FreeGangs.Server.HasPermission(source, FreeGangs.Permissions.COLLECT_PROTECTION) then
+            return false, FreeGangs.L('activities', 'protection_no_permission')
+        end
+        local cooldownRemaining = FreeGangs.Server.GetCooldownRemaining(source, 'protection_robbery')
+        if cooldownRemaining > 0 then
+            return false, FreeGangs.L('activities', 'on_cooldown', FreeGangs.Utils.FormatDuration(cooldownRemaining * 1000))
+        end
+        return true
+
     elseif activity == 'graffiti' then
         -- Gang members only
         local gangData = FreeGangs.Server.GetPlayerGangData(source)
@@ -369,6 +384,26 @@ lib.callback.register('freegangs:activities:takeoverProtection', function(source
 end)
 
 -- ============================================================================
+-- PROTECTION ROBBERY CALLBACKS
+-- ============================================================================
+
+---Rob rival's protection (with anti-cheat timing validation)
+lib.callback.register('freegangs:activities:robProtection', function(source, businessId)
+    if not businessId or type(businessId) ~= 'string' then return false, 'Invalid data' end
+
+    local tracking = activeProtection[source]
+    if not tracking then return false, 'No active protection session' end
+    if tracking.action ~= 'robbery' then return false, 'Invalid action' end
+    if tracking.businessId ~= businessId then return false, 'Business mismatch' end
+
+    local elapsed = FreeGangs.Utils.GetTimestamp() - tracking.startTime
+    if elapsed < 7 then return false, 'Too fast' end
+
+    activeProtection[source] = nil
+    return FreeGangs.Server.Activities.RobProtection(source, businessId)
+end)
+
+-- ============================================================================
 -- GRAFFITI CALLBACKS
 -- ============================================================================
 
@@ -552,7 +587,7 @@ end)
 -- Handle protection start (track for completion validation)
 RegisterNetEvent('freegangs:server:startProtection', function(businessId, action)
     local source = source
-    local validActions = { register = true, collect = true, takeover = true }
+    local validActions = { register = true, collect = true, takeover = true, robbery = true }
     if type(businessId) == 'string' and validActions[action] then
         activeProtection[source] = { businessId = businessId, action = action, startTime = FreeGangs.Utils.GetTimestamp() }
     end

@@ -155,6 +155,7 @@ FreeGangs.Config.Heat = {
         Graffiti = 5,
         RivalKill = 20,
         ProtectionCollect = 12,
+        ProtectionRobbery = 30,
     },
     
     -- Stage-differentiated decay multipliers (applied to GangDecayRate per tick)
@@ -733,6 +734,55 @@ FreeGangs.Config.Activities = {
                 fallbackDict = 'mp_common',
                 fallbackAnim = 'givetake1_a',
                 duration = 2500,
+                flag = 49,
+            },
+        },
+
+        -- ====================================================================
+        -- PROTECTION ROBBERY SYSTEM
+        -- ====================================================================
+        -- Gangs with 30%+ zone control can rob a rival's protection payout
+        -- without taking over the business. Generates major inter-gang heat.
+        Robbery = {
+            Enabled = true,
+
+            -- Minimum zone control required to rob a rival's protection (%)
+            MinControlForRobbery = 30,
+
+            -- Base success chance before modifiers (0-100)
+            BaseSuccessChance = 45,
+
+            -- Zone control bonus: +ControlBonus% per % above MinControlForRobbery
+            ControlBonus = 0.6,
+
+            -- Penalty per heat point between gangs (makes repeated robberies harder)
+            HeatPenaltyPerPoint = 0.2,
+
+            -- Percentage of the business's base payout stolen on success (0.0-1.0)
+            PayoutPercent = 0.75,
+
+            -- Inter-gang heat generated on successful robbery
+            HeatGenerated = 35,
+
+            -- Inter-gang heat generated even on failed robbery attempt
+            FailHeatGenerated = 15,
+
+            -- Cooldown per business after robbery attempt (success or fail, seconds)
+            CooldownPerBusiness = 3600, -- 1 hour
+
+            -- Global player cooldown between robbery attempts (seconds)
+            PlayerCooldown = 900, -- 15 minutes
+
+            -- Duration of robbery progress bar (ms)
+            Duration = 10000,
+
+            -- Animation for robbery scene
+            Animation = {
+                dict = 'anim@heists@ornate_bank@grab_cash_heels',
+                anim = 'grab',
+                fallbackDict = 'mp_common',
+                fallbackAnim = 'givetake1_a',
+                duration = 10000,
                 flag = 49,
             },
         },
