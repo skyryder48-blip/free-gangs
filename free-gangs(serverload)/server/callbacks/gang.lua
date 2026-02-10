@@ -384,7 +384,7 @@ end)
 
 ---Get server time (for sync)
 lib.callback.register('free-gangs:callback:getServerTime', function(source)
-    return os.time()
+    return FreeGangs.Utils.GetTimestamp()
 end)
 
 ---Get game time

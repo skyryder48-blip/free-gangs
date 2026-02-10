@@ -532,7 +532,7 @@ function FreeGangs.Server.Territory.CheckCapture(zoneName, triggeringGang)
     
     -- Check if on cooldown
     if territory.cooldownUntil then
-        local now = os.time()
+        local now = FreeGangs.Utils.GetTimestamp()
         if now < territory.cooldownUntil then
             FreeGangs.Utils.Debug('Zone on cooldown:', zoneName)
             return
@@ -576,8 +576,8 @@ function FreeGangs.Server.Territory.ProcessCapture(zoneName, oldOwner, newOwner)
     
     -- Set cooldown
     local cooldownSeconds = FreeGangs.Config.Territory.CaptureCooldownSeconds
-    territory.cooldownUntil = os.time() + cooldownSeconds
-    territory.lastFlip = os.time()
+    territory.cooldownUntil = FreeGangs.Utils.GetTimestamp() + cooldownSeconds
+    territory.lastFlip = FreeGangs.Utils.GetTimestamp()
     
     -- Update database
     FreeGangs.Server.DB.SetTerritoryCooldown(zoneName, territory.cooldownUntil)
@@ -731,8 +731,8 @@ function FreeGangs.Server.Territory.OnPlayerEnter(source, zoneName)
     
     presenceTracking[source] = {
         zone = zoneName,
-        enteredAt = os.time(),
-        lastTick = os.time(),
+        enteredAt = FreeGangs.Utils.GetTimestamp(),
+        lastTick = FreeGangs.Utils.GetTimestamp(),
         gang = playerGang,
     }
     
@@ -780,7 +780,7 @@ function FreeGangs.Server.Territory.ProcessPresenceTick(source, zoneName)
     FreeGangs.Server.Territory.AddInfluence(zoneName, playerGang, points, 'presence_tick')
     
     -- Update last tick time
-    tracking.lastTick = os.time()
+    tracking.lastTick = FreeGangs.Utils.GetTimestamp()
     
     -- Notify player
     FreeGangs.Bridge.Notify(source, 

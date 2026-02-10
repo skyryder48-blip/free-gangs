@@ -104,6 +104,11 @@ files {
     'nui/css/style.css',
     'nui/js/app.js',
     'locales/*.lua',
+    -- Graffiti DUI rendering
+    'html/graffiti.html',
+    'html/images/graffiti/*.png',
+    'html/images/graffiti/*.jpg',
+    'html/images/graffiti/*.svg',
 }
 
 -- Server exports (callable by other resources)

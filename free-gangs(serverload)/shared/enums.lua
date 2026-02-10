@@ -220,20 +220,20 @@ FreeGangs.HeatStageThresholds = {
     },
     [FreeGangs.HeatStages.COLD_WAR] = {
         minHeat = 50,
-        maxHeat = 74,
+        maxHeat = 64,
         label = 'Cold War',
         color = '#FF9800',
         effects = { 'ui_heat_indicator', 'territory_warnings' },
     },
     [FreeGangs.HeatStages.RIVALRY] = {
-        minHeat = 75,
-        maxHeat = 89,
+        minHeat = 65,
+        maxHeat = 84,
         label = 'Rivalry',
         color = '#F44336',
         effects = { 'ui_heat_indicator', 'territory_warnings', 'profit_reduction', 'protection_stopped' },
     },
     [FreeGangs.HeatStages.WAR_READY] = {
-        minHeat = 90,
+        minHeat = 85,
         maxHeat = 100,
         label = 'War Ready',
         color = '#9C27B0',
@@ -499,6 +499,8 @@ FreeGangs.Activities = {
     GRAFFITI = 'graffiti',
     GRAFFITI_REMOVE = 'graffiti_remove',
     PROTECTION_COLLECT = 'protection_collect',
+    PROTECTION_REGISTER = 'protection_register',
+    PROTECTION_TAKEOVER = 'protection_takeover',
     ZONE_PRESENCE = 'zone_presence',
     RIVAL_KILL = 'rival_kill',
     BRIBE_USE = 'bribe_use',
@@ -548,6 +550,16 @@ FreeGangs.ActivityPoints = {
         masterRep = 15,
         zoneInfluence = 20,
         heat = 12,
+    },
+    [FreeGangs.Activities.PROTECTION_REGISTER] = {
+        masterRep = 25,
+        zoneInfluence = 15,
+        heat = 8,
+    },
+    [FreeGangs.Activities.PROTECTION_TAKEOVER] = {
+        masterRep = 35,
+        zoneInfluence = 25,
+        heat = 20,
     },
     [FreeGangs.Activities.ZONE_PRESENCE] = {
         masterRep = 0,
@@ -918,6 +930,7 @@ FreeGangs.Callbacks = {
     -- Activities
     CAN_PERFORM_ACTIVITY = 'free-gangs:callback:canPerformActivity',
     GET_PROTECTION_BUSINESSES = 'free-gangs:callback:getProtectionBusinesses',
+    GET_ZONE_BUSINESSES = 'free-gangs:callback:getZoneBusinesses',
     
     -- Graffiti
     GET_NEARBY_GRAFFITI = 'free-gangs:callback:getNearbyGraffiti',

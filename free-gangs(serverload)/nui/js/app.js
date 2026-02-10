@@ -761,8 +761,8 @@
      * @returns {object} Stage info
      */
     function getHeatStage(heat) {
-        if (heat >= 90) return { label: 'War Ready', class: 'rivalry' };
-        if (heat >= 75) return { label: 'Rivalry', class: 'rivalry' };
+        if (heat >= 85) return { label: 'War Ready', class: 'rivalry' };
+        if (heat >= 65) return { label: 'Rivalry', class: 'rivalry' };
         if (heat >= 50) return { label: 'Cold War', class: 'tension' };
         if (heat >= 30) return { label: 'Tension', class: 'tension' };
         return { label: 'Neutral', class: 'neutral' };
@@ -774,7 +774,7 @@
      * @returns {string} CSS class
      */
     function getHeatClass(heat) {
-        if (heat >= 75) return 'high';
+        if (heat >= 65) return 'high';
         if (heat >= 30) return 'medium';
         return 'low';
     }

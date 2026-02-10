@@ -372,7 +372,7 @@ function FreeGangs.Server.Prison.StartSmuggleMission(source, gangName, riskLevel
         rep = repReward,
         detectionChance = riskConfig.detectionChance,
         status = 'active',
-        startTime = os.time(),
+        startTime = FreeGangs.Utils.GetTimestamp(),
     }
 
     -- Set cooldown
@@ -605,22 +605,14 @@ function FreeGangs.Server.Prison.DeliverContraband(source, targetCitizenId, item
     for _, item in ipairs(items) do
         FreeGangs.Bridge.RemoveItem(source, item.name, item.count or 1)
     end
-
-    -- Store for jailed player to receive (append to existing delivery if present)
-    local existing = ContrabandDeliveries[targetCitizenId]
-    if existing then
-        for _, item in ipairs(items) do
-            table.insert(existing.items, item)
-        end
-        existing.deliveredAt = os.time()
-    else
-        ContrabandDeliveries[targetCitizenId] = {
-            items = items,
-            deliveredBy = citizenid,
-            deliveredAt = os.time(),
-        }
-    end
-
+    
+    -- Store for jailed player to receive
+    ContrabandDeliveries[targetCitizenId] = {
+        items = items,
+        deliveredBy = citizenid,
+        deliveredAt = FreeGangs.Utils.GetTimestamp(),
+    }
+    
     -- Set cooldown
     FreeGangs.Server.SetCooldown(source, cooldownKey, guardConfig.contrabandCooldown)
     
@@ -737,7 +729,7 @@ function FreeGangs.Server.Prison.HelpEscape(source, targetCitizenId)
     EscapeRequests[targetCitizenId] = {
         requestedBy = citizenid,
         gangName = gangName,
-        timestamp = os.time(),
+        timestamp = FreeGangs.Utils.GetTimestamp(),
         cost = cost,
     }
 

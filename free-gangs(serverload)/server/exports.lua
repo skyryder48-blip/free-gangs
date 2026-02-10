@@ -430,8 +430,8 @@ exports('AreGangsAtWar', AreGangsAtWar)
 local function GetRivalryStage(gang1, gang2)
     local heat = GetGangHeat(gang1, gang2)
     
-    if heat >= 90 then return FreeGangs.HeatStages.WAR_READY
-    elseif heat >= 75 then return FreeGangs.HeatStages.RIVALRY
+    if heat >= 85 then return FreeGangs.HeatStages.WAR_READY
+    elseif heat >= 65 then return FreeGangs.HeatStages.RIVALRY
     elseif heat >= 50 then return FreeGangs.HeatStages.COLD_WAR
     elseif heat >= 30 then return FreeGangs.HeatStages.TENSION
     else return FreeGangs.HeatStages.NEUTRAL

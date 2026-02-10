@@ -95,7 +95,7 @@ function FreeGangs.Server.Gang.Create(data, founderSource)
         master_level = 1,
         trap_spot = data.trap_spot,
         settings = data.settings or {},
-        created_at = os.time(),
+        created_at = FreeGangs.Utils.GetTimestamp(),
     }
     
     -- Insert into database

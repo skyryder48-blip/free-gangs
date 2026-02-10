@@ -91,7 +91,7 @@ local function ValidateWarDeclaration(attackerGang, defenderGang, collateral)
     -- Check cooldown
     local hasCooldown, cooldownUntil = FreeGangs.Server.DB.CheckWarCooldown(attackerGang, defenderGang)
     if hasCooldown then
-        local remaining = cooldownUntil - os.time()
+        local remaining = cooldownUntil - FreeGangs.Utils.GetTimestamp()
         return false, string.format('War cooldown active: %s remaining', FreeGangs.Utils.FormatDuration(remaining * 1000))
     end
     
@@ -197,7 +197,7 @@ function FreeGangs.Server.War.Declare(attackerGang, defenderGang, collateral, te
         defender_kills = 0,
         terms = terms or {},
         started_at = nil,
-        created_at = os.time(),
+        created_at = FreeGangs.Utils.GetTimestamp(),
     }
     
     -- Log the declaration
@@ -264,7 +264,7 @@ function FreeGangs.Server.War.Accept(warId, defenderGang, defenderCollateral)
     -- Update war record
     war.defender_collateral = defenderCollateral
     war.status = FreeGangs.WarStatus.ACTIVE
-    war.started_at = os.time()
+    war.started_at = FreeGangs.Utils.GetTimestamp()
     
     FreeGangs.Server.DB.AcceptWar(warId, defenderCollateral)
     
@@ -371,13 +371,13 @@ function FreeGangs.Server.War.RequestPeace(warId, requestingGang)
     
     -- Initialize peace request tracking
     war.peace_requests = war.peace_requests or {}
-    war.peace_requests[requestingGang] = os.time()
+    war.peace_requests[requestingGang] = FreeGangs.Utils.GetTimestamp()
     
     -- Check if both sides have requested peace within 5 minutes of each other
     local otherGang = requestingGang == war.attacker and war.defender or war.attacker
     local otherRequest = war.peace_requests[otherGang]
     
-    if otherRequest and (os.time() - otherRequest) < 300 then
+    if otherRequest and (FreeGangs.Utils.GetTimestamp() - otherRequest) < 300 then
         -- Both agreed - mutual peace
         return FreeGangs.Server.War.End(warId, nil, 'mutual_peace')
     end
@@ -455,12 +455,12 @@ function FreeGangs.Server.War.End(warId, winner, reason)
     -- Update war record
     war.status = status
     war.winner = winner
-    war.ended_at = os.time()
+    war.ended_at = FreeGangs.Utils.GetTimestamp()
     
     FreeGangs.Server.DB.UpdateWarStatus(warId, status, winner)
     
     -- Set cooldown
-    local cooldownUntil = os.time() + (WAR_COOLDOWN_HOURS * 3600)
+    local cooldownUntil = FreeGangs.Utils.GetTimestamp() + (WAR_COOLDOWN_HOURS * 3600)
     FreeGangs.Server.DB.SetWarCooldown(war.attacker, war.defender, cooldownUntil, reason)
     
     -- Log

@@ -784,7 +784,7 @@ function FreeGangs.Client.UI.OpenWarStatus()
                 icon = 'fire',
                 iconColor = stageInfo.color,
                 progress = heat,
-                colorScheme = heat >= 75 and 'red' or (heat >= 50 and 'orange' or (heat >= 30 and 'yellow' or 'gray')),
+                colorScheme = heat >= 65 and 'red' or (heat >= 50 and 'orange' or (heat >= 30 and 'yellow' or 'gray')),
                 onSelect = function()
                     FreeGangs.Client.UI.ShowRivalryDetails(otherGang, heat)
                 end,
@@ -1361,8 +1361,8 @@ end
 ---@param heat number
 ---@return string
 function FreeGangs.Client.UI.GetHeatStage(heat)
-    if heat >= 90 then return FreeGangs.HeatStages.WAR_READY
-    elseif heat >= 75 then return FreeGangs.HeatStages.RIVALRY
+    if heat >= 85 then return FreeGangs.HeatStages.WAR_READY
+    elseif heat >= 65 then return FreeGangs.HeatStages.RIVALRY
     elseif heat >= 50 then return FreeGangs.HeatStages.COLD_WAR
     elseif heat >= 30 then return FreeGangs.HeatStages.TENSION
     else return FreeGangs.HeatStages.NEUTRAL

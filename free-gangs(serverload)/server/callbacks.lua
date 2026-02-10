@@ -420,7 +420,7 @@ lib.callback.register(FreeGangs.Callbacks.GET_PROTECTION_BUSINESSES, function(so
         if business.last_collection then
             local cooldownSeconds = FreeGangs.Config.Activities.Protection.CollectionIntervalHours * 3600
             business.ready_at = business.last_collection + cooldownSeconds
-            business.is_ready = os.time() >= business.ready_at
+            business.is_ready = FreeGangs.Utils.GetTimestamp() >= business.ready_at
         else
             business.is_ready = true
         end
@@ -614,7 +614,7 @@ end)
 
 ---Get server time (for sync)
 lib.callback.register('free-gangs:callback:getServerTime', function(source)
-    return os.time()
+    return FreeGangs.Utils.GetTimestamp()
 end)
 
 ---Get game time

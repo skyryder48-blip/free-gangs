@@ -213,7 +213,7 @@ function FreeGangs.Server.Member.Invite(inviterSource, targetSource)
     pendingInvites[targetCitizenid] = {
         gangName = gangName,
         invitedBy = inviterCitizenid,
-        expiresAt = os.time() + 120,
+        expiresAt = FreeGangs.Utils.GetTimestamp() + 120,
     }
     
     -- Send invite notification to target
@@ -244,7 +244,7 @@ function FreeGangs.Server.Member.AcceptInvite(source)
     end
     
     -- Check expiry
-    if os.time() > invite.expiresAt then
+    if FreeGangs.Utils.GetTimestamp() > invite.expiresAt then
         pendingInvites[citizenid] = nil
         return false, 'Invite has expired'
     end
@@ -680,7 +680,7 @@ CreateThread(function()
     while true do
         Wait(60000) -- Every minute
         
-        local currentTime = os.time()
+        local currentTime = FreeGangs.Utils.GetTimestamp()
         for citizenid, invite in pairs(pendingInvites) do
             if currentTime > invite.expiresAt then
                 pendingInvites[citizenid] = nil

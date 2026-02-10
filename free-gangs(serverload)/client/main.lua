@@ -13,7 +13,7 @@ FreeGangs.Client = FreeGangs.Client or {}
 FreeGangs.Client.Ready = false
 FreeGangs.Client.PlayerGang = nil
 FreeGangs.Client.CurrentZone = nil
-FreeGangs.Client.NearbyGraffiti = {}
+FreeGangs.Client.Zones = {}
 
 -- Cached player ped (updated periodically)
 local cachedPed = nil
@@ -67,10 +67,142 @@ function FreeGangs.Client.RequestInitialData()
     end
 end
 
--- NOTE: Zone creation and zone enter/exit/inside handlers are handled by
--- client/module/territory.lua (FreeGangs.Client.Territory). Do NOT duplicate
--- zone logic here. The territory module sets FreeGangs.Client.CurrentZone and
--- calls graffiti load/clear on enter/exit.
+---Initialize territory zones
+function FreeGangs.Client.InitializeZones()
+    local territories = FreeGangs.Client.Cache.Get('territories') or {}
+    
+    for zoneName, territory in pairs(territories) do
+        FreeGangs.Client.CreateZone(zoneName, territory)
+    end
+    
+    FreeGangs.Utils.Debug('Initialized ' .. FreeGangs.Utils.TableLength(FreeGangs.Client.Zones) .. ' zones')
+end
+
+---Create a zone for a territory
+---@param zoneName string
+---@param territory table
+function FreeGangs.Client.CreateZone(zoneName, territory)
+    if FreeGangs.Client.Zones[zoneName] then
+        FreeGangs.Client.Zones[zoneName]:remove()
+    end
+    
+    local coords = territory.coords
+    if not coords or not coords.x then return end
+    
+    local zone
+    
+    if territory.radius then
+        -- Sphere zone
+        zone = lib.zones.sphere({
+            coords = vec3(coords.x, coords.y, coords.z),
+            radius = territory.radius,
+            debug = FreeGangs.Config.General.Debug,
+            onEnter = function(self)
+                FreeGangs.Client.OnEnterZone(zoneName, territory)
+            end,
+            onExit = function(self)
+                FreeGangs.Client.OnExitZone(zoneName, territory)
+            end,
+            inside = function(self)
+                FreeGangs.Client.OnInsideZone(zoneName, territory)
+            end,
+        })
+    elseif territory.size then
+        -- Box zone
+        zone = lib.zones.box({
+            coords = vec3(coords.x, coords.y, coords.z),
+            size = vec3(territory.size.x, territory.size.y, territory.size.z),
+            rotation = territory.rotation or 0,
+            debug = FreeGangs.Config.General.Debug,
+            onEnter = function(self)
+                FreeGangs.Client.OnEnterZone(zoneName, territory)
+            end,
+            onExit = function(self)
+                FreeGangs.Client.OnExitZone(zoneName, territory)
+            end,
+            inside = function(self)
+                FreeGangs.Client.OnInsideZone(zoneName, territory)
+            end,
+        })
+    end
+    
+    if zone then
+        FreeGangs.Client.Zones[zoneName] = zone
+    end
+end
+
+-- ============================================================================
+-- ZONE HANDLERS
+-- ============================================================================
+
+---Called when player enters a zone
+---@param zoneName string
+---@param territory table
+function FreeGangs.Client.OnEnterZone(zoneName, territory)
+    FreeGangs.Client.CurrentZone = {
+        name = zoneName,
+        data = territory,
+        enteredAt = GetGameTimer(),
+    }
+    
+    -- Get latest influence data from GlobalState
+    local stateData = GlobalState['territory:' .. zoneName]
+    if stateData then
+        territory.influence = stateData.influence
+    end
+    
+    -- Notify server
+    TriggerServerEvent(FreeGangs.Events.Server.ENTER_TERRITORY, zoneName)
+    
+    -- Show territory notification
+    local ownerGang = FreeGangs.Client.GetZoneOwner(territory)
+    local message
+    
+    if ownerGang then
+        message = string.format(FreeGangs.Config.Messages.TerritoryEntered, ownerGang)
+    else
+        message = string.format(FreeGangs.Config.Messages.TerritoryEntered, 'Neutral')
+    end
+    
+    if FreeGangs.Config.UI.ShowTerritoryHUD then
+        FreeGangs.Bridge.Notify(message, 'inform', 3000)
+    end
+    
+    -- Load protection targets for this zone (async, won't block)
+    CreateThread(function()
+        if FreeGangs.Client.Activities and FreeGangs.Client.Activities.LoadZoneProtection then
+            FreeGangs.Client.Activities.LoadZoneProtection(zoneName)
+        end
+    end)
+
+    FreeGangs.Utils.Debug('Entered zone:', zoneName)
+end
+
+---Called when player exits a zone
+---@param zoneName string
+---@param territory table
+function FreeGangs.Client.OnExitZone(zoneName, territory)
+    -- Notify server
+    TriggerServerEvent(FreeGangs.Events.Server.EXIT_TERRITORY, zoneName)
+
+    -- Clear protection targets
+    if FreeGangs.Client.Activities and FreeGangs.Client.Activities.ClearProtectionTargets then
+        FreeGangs.Client.Activities.ClearProtectionTargets()
+    end
+
+    -- Clear current zone
+    FreeGangs.Client.CurrentZone = nil
+
+    FreeGangs.Utils.Debug('Exited zone:', zoneName)
+end
+
+---Called every frame while inside a zone (use sparingly)
+---@param zoneName string
+---@param territory table
+function FreeGangs.Client.OnInsideZone(zoneName, territory)
+    -- This runs every frame - only do essential rendering here
+    -- Heavy logic should be in background threads
+end
 
 ---Get zone owner (gang with majority control)
 ---@param territory table
@@ -185,55 +317,8 @@ function FreeGangs.Client.RegisterKeybinds()
 end
 
 -- ============================================================================
--- GRAFFITI MANAGEMENT
+-- GRAFFITI MANAGEMENT (delegated to client/module/graffiti.lua)
 -- ============================================================================
-
----Load nearby graffiti
-function FreeGangs.Client.LoadNearbyGraffiti()
-    if not FreeGangs.Client.CurrentZone then return end
-    
-    local graffiti = lib.callback.await(FreeGangs.Callbacks.GET_NEARBY_GRAFFITI, false, 
-        FreeGangs.Bridge.GetPlayerCoords(),
-        FreeGangs.Config.Activities.Graffiti.RenderDistance
-    )
-    
-    if graffiti then
-        for _, tag in pairs(graffiti) do
-            FreeGangs.Client.SpawnGraffiti(tag)
-        end
-    end
-end
-
----Clear nearby graffiti
-function FreeGangs.Client.ClearNearbyGraffiti()
-    for id, data in pairs(FreeGangs.Client.NearbyGraffiti) do
-        FreeGangs.Client.RemoveGraffitiVisual(id)
-    end
-    FreeGangs.Client.NearbyGraffiti = {}
-end
-
----Spawn a graffiti tag in the world
----@param tag table
-function FreeGangs.Client.SpawnGraffiti(tag)
-    -- Store reference for cleanup
-    FreeGangs.Client.NearbyGraffiti[tag.id] = tag
-    
-    -- Visual implementation depends on method chosen
-    -- Using runtime texture replacement (most performant)
-    -- This would be implemented with actual texture loading
-    FreeGangs.Utils.Debug('Spawned graffiti:', tag.id)
-end
-
----Remove a graffiti visual
----@param tagId number
-function FreeGangs.Client.RemoveGraffitiVisual(tagId)
-    local tag = FreeGangs.Client.NearbyGraffiti[tagId]
-    if not tag then return end
-    
-    -- Cleanup visual resources
-    FreeGangs.Client.NearbyGraffiti[tagId] = nil
-    FreeGangs.Utils.Debug('Removed graffiti:', tagId)
-end
 
 -- ============================================================================
 -- UTILITY FUNCTIONS
@@ -425,22 +510,7 @@ RegisterNetEvent(FreeGangs.Events.Client.BRIBE_DUE, function(contactType, hoursR
     })
 end)
 
----Handle graffiti load from server
-RegisterNetEvent(FreeGangs.Events.Client.LOAD_GRAFFITI, function(graffiti)
-    for _, tag in pairs(graffiti) do
-        FreeGangs.Client.SpawnGraffiti(tag)
-    end
-end)
-
----Handle single graffiti add
-RegisterNetEvent(FreeGangs.Events.Client.ADD_GRAFFITI, function(tag)
-    FreeGangs.Client.SpawnGraffiti(tag)
-end)
-
----Handle graffiti removal
-RegisterNetEvent(FreeGangs.Events.Client.REMOVE_GRAFFITI, function(tagId)
-    FreeGangs.Client.RemoveGraffitiVisual(tagId)
-end)
+-- Graffiti events handled by client/module/graffiti.lua (DUI renderer)
 
 -- ============================================================================
 -- RESOURCE CLEANUP
@@ -449,11 +519,16 @@ end)
 AddEventHandler('onResourceStop', function(resourceName)
     if resourceName ~= GetCurrentResourceName() then return end
 
-    -- NOTE: Zone cleanup is handled by client/module/territory.lua's own
-    -- onResourceStop handler. Only clear graffiti visuals here.
+    -- Remove all zones
+    for zoneName, zone in pairs(FreeGangs.Client.Zones) do
+        zone:remove()
+    end
+    FreeGangs.Client.Zones = {}
 
-    -- Clear graffiti
-    FreeGangs.Client.ClearNearbyGraffiti()
+    -- Clean up protection targets
+    if FreeGangs.Client.Activities and FreeGangs.Client.Activities.ClearProtectionTargets then
+        FreeGangs.Client.Activities.ClearProtectionTargets()
+    end
 end)
 
 -- ============================================================================

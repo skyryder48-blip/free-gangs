@@ -239,27 +239,105 @@ function FreeGangs.Utils.RandomFloat(min, max)
 end
 
 -- ============================================================================
--- TIME UTILITIES
+-- TIME UTILITIES (FiveM-compatible, no os.time/os.date dependency)
 -- ============================================================================
 
-if IsDuplicityVersion() then
-    -- SERVER SIDE: os library is available
-    ---Get current timestamp in seconds
-    ---@return number
-    function FreeGangs.Utils.GetTimestamp()
-        return os.time()
+---Convert Unix timestamp to date components (pure Lua, no os dependency)
+---@param timestamp number
+---@return table {year, month, day, hour, min, sec}
+local function unixToDate(timestamp)
+    timestamp = math.floor(timestamp or 0)
+    local days = math.floor(timestamp / 86400)
+    local remaining = timestamp % 86400
+
+    local hours = math.floor(remaining / 3600)
+    remaining = remaining % 3600
+    local minutes = math.floor(remaining / 60)
+    local seconds = remaining % 60
+
+    local year = 1970
+    while true do
+        local daysInYear = (year % 4 == 0 and (year % 100 ~= 0 or year % 400 == 0)) and 366 or 365
+        if days < daysInYear then break end
+        days = days - daysInYear
+        year = year + 1
     end
 
-    ---Format timestamp to readable date
-    ---@param timestamp number
-    ---@param format string|nil
-    ---@return string
-    function FreeGangs.Utils.FormatTime(timestamp, format)
-        format = format or "%Y-%m-%d %H:%M:%S"
-        return os.date(format, timestamp)
+    local isLeap = (year % 4 == 0 and (year % 100 ~= 0 or year % 400 == 0))
+    local daysInMonth = {31, isLeap and 29 or 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31}
+    local month = 1
+    while month <= 12 and days >= daysInMonth[month] do
+        days = days - daysInMonth[month]
+        month = month + 1
+    end
+
+    return {
+        year = year, month = month, day = days + 1,
+        hour = hours, min = minutes, sec = seconds,
+    }
+end
+
+---Convert date components to Unix timestamp (UTC, pure Lua)
+---@param year number
+---@param month number
+---@param day number
+---@param hour number
+---@param min number
+---@param sec number
+---@return number
+local function dateToUnix(year, month, day, hour, min, sec)
+    local days = 0
+    for y = 1970, year - 1 do
+        days = days + ((y % 4 == 0 and (y % 100 ~= 0 or y % 400 == 0)) and 366 or 365)
+    end
+    local isLeap = (year % 4 == 0 and (year % 100 ~= 0 or year % 400 == 0))
+    local daysInMonth = {31, isLeap and 29 or 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31}
+    for m = 1, month - 1 do
+        days = days + daysInMonth[m]
+    end
+    days = days + day - 1
+    return days * 86400 + hour * 3600 + min * 60 + sec
+end
+
+---Format timestamp to readable date string (pure Lua, no os dependency)
+---@param timestamp number Unix timestamp
+---@param format string|nil strftime-like format (supports %Y, %m, %d, %H, %M, %S)
+---@return string
+function FreeGangs.Utils.FormatTime(timestamp, format)
+    format = format or "%Y-%m-%d %H:%M:%S"
+    local d = unixToDate(timestamp)
+    local result = format
+    result = result:gsub('%%Y', string.format('%04d', d.year))
+    result = result:gsub('%%m', string.format('%02d', d.month))
+    result = result:gsub('%%d', string.format('%02d', d.day))
+    result = result:gsub('%%H', string.format('%02d', d.hour))
+    result = result:gsub('%%M', string.format('%02d', d.min))
+    result = result:gsub('%%S', string.format('%02d', d.sec))
+    return result
+end
+
+if IsDuplicityVersion() then
+    -- SERVER SIDE: Initialize epoch from MySQL, derive time via GetGameTimer
+    local _serverEpoch = nil
+    local _serverInitTimer = nil
+
+    ---Initialize server time from database (call during resource startup, after MySQL.ready)
+    function FreeGangs.Utils.InitServerTime()
+        _serverEpoch = MySQL.scalar.await('SELECT UNIX_TIMESTAMP(NOW())')
+        _serverInitTimer = GetGameTimer()
+        FreeGangs.Utils.Log('Server time initialized: ' .. tostring(_serverEpoch))
+    end
+
+    ---Get current Unix timestamp (FiveM-compatible, no os.time dependency)
+    ---@return number
+    function FreeGangs.Utils.GetTimestamp()
+        if not _serverEpoch then
+            return math.floor(GetGameTimer() / 1000)
+        end
+        return _serverEpoch + math.floor((GetGameTimer() - _serverInitTimer) / 1000)
     end
 else
-    -- CLIENT SIDE: os library is NOT available in FiveM client
+    -- CLIENT SIDE: Sync with server Unix time via GetGameTimer offset
     local _timeSync = { offset = 0, synced = false }
 
     ---Sync client time with server Unix time (call once during init)
@@ -269,66 +347,14 @@ else
         _timeSync.synced = true
     end
 
-    ---Get current timestamp in seconds (synced with server)
+    ---Get current Unix timestamp (synced with server)
     ---@return number
     function FreeGangs.Utils.GetTimestamp()
         return math.floor(GetGameTimer() / 1000 + _timeSync.offset)
     end
-
-    ---Convert Unix timestamp to date components (pure Lua, no os dependency)
-    ---@param timestamp number
-    ---@return table {year, month, day, hour, min, sec}
-    local function unixToDate(timestamp)
-        timestamp = math.floor(timestamp or 0)
-        local days = math.floor(timestamp / 86400)
-        local remaining = timestamp % 86400
-
-        local hours = math.floor(remaining / 3600)
-        remaining = remaining % 3600
-        local minutes = math.floor(remaining / 60)
-        local seconds = remaining % 60
-
-        local year = 1970
-        while true do
-            local daysInYear = (year % 4 == 0 and (year % 100 ~= 0 or year % 400 == 0)) and 366 or 365
-            if days < daysInYear then break end
-            days = days - daysInYear
-            year = year + 1
-        end
-
-        local isLeap = (year % 4 == 0 and (year % 100 ~= 0 or year % 400 == 0))
-        local daysInMonth = {31, isLeap and 29 or 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31}
-        local month = 1
-        while month <= 12 and days >= daysInMonth[month] do
-            days = days - daysInMonth[month]
-            month = month + 1
-        end
-
-        return {
-            year = year, month = month, day = days + 1,
-            hour = hours, min = minutes, sec = seconds,
-        }
-    end
-
-    ---Format timestamp to readable date (pure Lua implementation)
-    ---@param timestamp number
-    ---@param format string|nil
-    ---@return string
-    function FreeGangs.Utils.FormatTime(timestamp, format)
-        format = format or "%Y-%m-%d %H:%M:%S"
-        local d = unixToDate(timestamp)
-        local result = format
-        result = result:gsub('%%Y', string.format('%04d', d.year))
-        result = result:gsub('%%m', string.format('%02d', d.month))
-        result = result:gsub('%%d', string.format('%02d', d.day))
-        result = result:gsub('%%H', string.format('%02d', d.hour))
-        result = result:gsub('%%M', string.format('%02d', d.min))
-        result = result:gsub('%%S', string.format('%02d', d.sec))
-        return result
-    end
 end
 
----Parse MySQL datetime string to Unix timestamp
+---Parse MySQL datetime string to Unix timestamp (pure Lua, no os dependency)
 ---@param dateStr string MySQL datetime (e.g., "2025-01-15 14:30:00")
 ---@return number|nil Unix timestamp
 function FreeGangs.Utils.ParseTimestamp(dateStr)
@@ -342,41 +368,7 @@ function FreeGangs.Utils.ParseTimestamp(dateStr)
     local year, month, day, hour, min, sec = dateStr:match("(%d+)-(%d+)-(%d+)%s+(%d+):(%d+):(%d+)")
     if not year then return nil end
 
-    if IsDuplicityVersion() then
-        return os.time({
-            year = tonumber(year),
-            month = tonumber(month),
-            day = tonumber(day),
-            hour = tonumber(hour),
-            min = tonumber(min),
-            sec = tonumber(sec),
-        })
-    end
-
-    -- Client-side fallback: approximate calculation
-    -- This is less precise but functional for cooldown checks
-    local y = tonumber(year)
-    local m = tonumber(month)
-    local d = tonumber(day)
-    local h = tonumber(hour)
-    local mn = tonumber(min)
-    local s = tonumber(sec)
-
-    -- Days from year
-    local days = 0
-    for i = 1970, y - 1 do
-        days = days + ((i % 4 == 0 and (i % 100 ~= 0 or i % 400 == 0)) and 366 or 365)
-    end
-
-    -- Days from month
-    local isLeap = (y % 4 == 0 and (y % 100 ~= 0 or y % 400 == 0))
-    local daysInMonth = {31, isLeap and 29 or 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31}
-    for i = 1, m - 1 do
-        days = days + daysInMonth[i]
-    end
-    days = days + d - 1
-
-    return days * 86400 + h * 3600 + mn * 60 + s
+    return dateToUnix(tonumber(year), tonumber(month), tonumber(day), tonumber(hour), tonumber(min), tonumber(sec))
 end
 
 ---Get time difference in human readable format
@@ -686,7 +678,7 @@ function FreeGangs.Utils.CalculateBribeCost(contactType, archetype, heatLevel)
     end
     
     -- Heat increases cost
-    if heatLevel >= 90 then
+    if heatLevel >= 85 then
         modifier = modifier + 1.0 -- +100%
     end
     

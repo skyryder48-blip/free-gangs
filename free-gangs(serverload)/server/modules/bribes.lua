@@ -93,7 +93,7 @@ function FreeGangs.Server.Bribes.SpawnContacts()
         if isActiveTime then
             -- Check if we need to spawn this contact
             local spawned = FreeGangs.Server.SpawnedContacts[contactType]
-            if not spawned or (spawned.despawnAt and os.time() > spawned.despawnAt) then
+            if not spawned or (spawned.despawnAt and FreeGangs.Utils.GetTimestamp() > spawned.despawnAt) then
                 FreeGangs.Server.Bribes.SpawnContact(contactType)
             end
         else
@@ -152,8 +152,8 @@ function FreeGangs.Server.Bribes.SpawnContact(contactType)
         pedModel = location.pedModel,
         scenario = location.scenario,
         label = location.label,
-        spawnedAt = os.time(),
-        despawnAt = os.time() + FreeGangs.Config.BribeContacts.SpawnSettings.contactDuration,
+        spawnedAt = FreeGangs.Utils.GetTimestamp(),
+        despawnAt = FreeGangs.Utils.GetTimestamp() + FreeGangs.Config.BribeContacts.SpawnSettings.contactDuration,
     }
     
     -- Notify all clients about new contact
@@ -226,8 +226,8 @@ function FreeGangs.Server.Bribes.Approach(source, contactType)
     -- Check approach cooldown
     local cooldownKey = gangName .. '_approach'
     if FreeGangs.Server.ApproachCooldowns[cooldownKey] then
-        if os.time() < FreeGangs.Server.ApproachCooldowns[cooldownKey] then
-            local remaining = FreeGangs.Server.ApproachCooldowns[cooldownKey] - os.time()
+        if FreeGangs.Utils.GetTimestamp() < FreeGangs.Server.ApproachCooldowns[cooldownKey] then
+            local remaining = FreeGangs.Server.ApproachCooldowns[cooldownKey] - FreeGangs.Utils.GetTimestamp()
             return false, 'Gang is on approach cooldown (' .. FreeGangs.Utils.FormatDuration(remaining * 1000) .. ')'
         end
     end
@@ -235,8 +235,8 @@ function FreeGangs.Server.Bribes.Approach(source, contactType)
     -- Check for terminated cooldown
     local termCooldownKey = gangName .. '_' .. contactType .. '_terminated'
     if FreeGangs.Server.ApproachCooldowns[termCooldownKey] then
-        if os.time() < FreeGangs.Server.ApproachCooldowns[termCooldownKey] then
-            local remaining = FreeGangs.Server.ApproachCooldowns[termCooldownKey] - os.time()
+        if FreeGangs.Utils.GetTimestamp() < FreeGangs.Server.ApproachCooldowns[termCooldownKey] then
+            local remaining = FreeGangs.Server.ApproachCooldowns[termCooldownKey] - FreeGangs.Utils.GetTimestamp()
             return false, 'Cannot approach this contact yet (' .. FreeGangs.Utils.FormatDuration(remaining * 1000) .. ')'
         end
     end
@@ -260,7 +260,7 @@ function FreeGangs.Server.Bribes.Approach(source, contactType)
         -- Success - open bribe window
         local pendingKey = gangName .. '_' .. contactType
         FreeGangs.Server.PendingBribes[pendingKey] = {
-            expires = os.time() + (FreeGangs.Config.Bribes.Approach.BribeWindowMinutes * 60),
+            expires = FreeGangs.Utils.GetTimestamp() + (FreeGangs.Config.Bribes.Approach.BribeWindowMinutes * 60),
             contactType = contactType,
             initiator = citizenid,
         }
@@ -276,7 +276,7 @@ function FreeGangs.Server.Bribes.Approach(source, contactType)
     else
         -- Failure - set cooldown and deduct rep
         local cooldownHours = FreeGangs.Config.Bribes.Approach.FailCooldownHours
-        FreeGangs.Server.ApproachCooldowns[cooldownKey] = os.time() + (cooldownHours * 3600)
+        FreeGangs.Server.ApproachCooldowns[cooldownKey] = FreeGangs.Utils.GetTimestamp() + (cooldownHours * 3600)
         
         -- Deduct reputation
         local repLoss = FreeGangs.Config.Bribes.Approach.FailRepLoss
@@ -316,7 +316,7 @@ function FreeGangs.Server.Bribes.Establish(source, gangName, contactType)
         return false, 'No pending bribe window'
     end
     
-    if os.time() > pending.expires then
+    if FreeGangs.Utils.GetTimestamp() > pending.expires then
         FreeGangs.Server.PendingBribes[pendingKey] = nil
         -- Apply timeout penalty
         local repLoss = FreeGangs.Config.Bribes.Approach.TimeoutRepLoss
@@ -324,7 +324,7 @@ function FreeGangs.Server.Bribes.Establish(source, gangName, contactType)
         
         local cooldownHours = FreeGangs.Config.Bribes.Approach.TimeoutCooldownHours
         local termCooldownKey = gangName .. '_' .. contactType .. '_terminated'
-        FreeGangs.Server.ApproachCooldowns[termCooldownKey] = os.time() + (cooldownHours * 3600)
+        FreeGangs.Server.ApproachCooldowns[termCooldownKey] = FreeGangs.Utils.GetTimestamp() + (cooldownHours * 3600)
         
         return false, 'Bribe window expired (-' .. repLoss .. ' rep)'
     end
@@ -357,7 +357,7 @@ function FreeGangs.Server.Bribes.Establish(source, gangName, contactType)
     FreeGangs.Server.Cache.MarkDirty('gang', gangName)
     
     -- Calculate next payment date (7 days)
-    local nextPayment = os.time() + (7 * 24 * 3600)
+    local nextPayment = FreeGangs.Utils.GetTimestamp() + (7 * 24 * 3600)
     
     -- Insert into database
     local insertId = MySQL.insert.await([[
@@ -377,8 +377,8 @@ function FreeGangs.Server.Bribes.Establish(source, gangName, contactType)
         id = insertId,
         contactType = contactType,
         contactLevel = 1,
-        establishedAt = os.time(),
-        lastPayment = os.time(),
+        establishedAt = FreeGangs.Utils.GetTimestamp(),
+        lastPayment = FreeGangs.Utils.GetTimestamp(),
         nextPayment = nextPayment,
         missedPayments = 0,
         status = 'active',
@@ -424,7 +424,7 @@ end
 
 ---Check all bribes for due/overdue payments
 function FreeGangs.Server.Bribes.CheckPayments()
-    local now = os.time()
+    local now = FreeGangs.Utils.GetTimestamp()
     local reminderHours = FreeGangs.Config.BribeContacts.PaymentReminders.reminderHours
     
     for gangName, bribes in pairs(FreeGangs.Server.ActiveBribes) do
@@ -484,7 +484,7 @@ function FreeGangs.Server.Bribes.HandleMissedPayment(gangName, contactType)
         ), 'error')
         
         -- Set next payment to 24 hours from now
-        bribe.nextPayment = os.time() + (24 * 3600)
+        bribe.nextPayment = FreeGangs.Utils.GetTimestamp() + (24 * 3600)
         
     elseif bribe.missedPayments >= 2 then
         -- Second miss: terminate
@@ -536,7 +536,7 @@ function FreeGangs.Server.Bribes.MakePayment(source, gangName, contactType)
     
     -- Apply heat multiplier
     local maxHeat = FreeGangs.Server.Bribes.GetGangMaxHeat(gangName)
-    if maxHeat >= 90 then
+    if maxHeat >= 85 then
         multiplier = multiplier + 1.0 -- +100%
     end
     
@@ -553,15 +553,15 @@ function FreeGangs.Server.Bribes.MakePayment(source, gangName, contactType)
     
     -- Calculate payment interval based on heat
     local paymentIntervalDays = 7
-    if maxHeat >= 75 then
+    if maxHeat >= 65 then
         paymentIntervalDays = 3
     elseif maxHeat >= 50 then
         paymentIntervalDays = 5
     end
     
     -- Update bribe status
-    bribe.lastPayment = os.time()
-    bribe.nextPayment = os.time() + (paymentIntervalDays * 24 * 3600)
+    bribe.lastPayment = FreeGangs.Utils.GetTimestamp()
+    bribe.nextPayment = FreeGangs.Utils.GetTimestamp() + (paymentIntervalDays * 24 * 3600)
     bribe.status = 'active'
     bribe.metadata.costMultiplier = 1.0 -- Reset multiplier
     
@@ -611,7 +611,7 @@ function FreeGangs.Server.Bribes.Terminate(gangName, contactType, reason)
         
         -- Set cooldown
         local termCooldownKey = gangName .. '_' .. contactType .. '_terminated'
-        FreeGangs.Server.ApproachCooldowns[termCooldownKey] = os.time() + (penalties.cooldownHours * 3600)
+        FreeGangs.Server.ApproachCooldowns[termCooldownKey] = FreeGangs.Utils.GetTimestamp() + (penalties.cooldownHours * 3600)
     end
     
     -- Remove from active bribes
@@ -996,7 +996,7 @@ function FreeGangs.Server.Bribes.AbilityCollectKickback(source, gangName, gang)
     if not bribe then return false, 'No city official contact' end
     
     local lastKickback = bribe.metadata.lastKickback or 0
-    local timeSinceKickback = os.time() - lastKickback
+    local timeSinceKickback = FreeGangs.Utils.GetTimestamp() - lastKickback
     
     if timeSinceKickback < config.intervalSeconds then
         local remaining = config.intervalSeconds - timeSinceKickback
@@ -1013,7 +1013,7 @@ function FreeGangs.Server.Bribes.AbilityCollectKickback(source, gangName, gang)
     FreeGangs.Server.Cache.MarkDirty('gang', gangName)
     
     -- Update last kickback time
-    bribe.metadata.lastKickback = os.time()
+    bribe.metadata.lastKickback = FreeGangs.Utils.GetTimestamp()
     MySQL.update([[
         UPDATE freegangs_bribes SET metadata = ? WHERE gang_name = ? AND contact_type = ?
     ]], { json.encode(bribe.metadata), gangName, FreeGangs.BribeContacts.CITY_OFFICIAL })
@@ -1124,7 +1124,7 @@ if FreeGangs.Config.General.Debug then
         local gangName = membership.gang_name
         local pendingKey = gangName .. '_' .. contactType
         FreeGangs.Server.PendingBribes[pendingKey] = {
-            expires = os.time() + 600,
+            expires = FreeGangs.Utils.GetTimestamp() + 600,
             contactType = contactType,
             initiator = citizenid,
         }

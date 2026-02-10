@@ -57,7 +57,7 @@ lib.callback.register('freegangs:bribes:getPaymentInfo', function(source, contac
     
     -- Apply heat multiplier
     local maxHeat = FreeGangs.Server.Bribes.GetGangMaxHeat(gangName)
-    if maxHeat >= 90 then
+    if maxHeat >= 85 then
         multiplier = multiplier + 1.0
     end
     
@@ -66,7 +66,7 @@ lib.callback.register('freegangs:bribes:getPaymentInfo', function(source, contac
     -- Calculate next due date
     local nextDue = nil
     if bribe.nextPayment then
-        local timeUntil = bribe.nextPayment - os.time()
+        local timeUntil = bribe.nextPayment - FreeGangs.Utils.GetTimestamp()
         if timeUntil > 0 then
             nextDue = FreeGangs.Utils.FormatDuration(timeUntil * 1000)
         else
@@ -314,7 +314,7 @@ lib.callback.register('freegangs:admin:forceEstablishBribe', function(source, ga
     -- Create pending window
     local pendingKey = gangName .. '_' .. contactType
     FreeGangs.Server.PendingBribes[pendingKey] = {
-        expires = os.time() + 600,
+        expires = FreeGangs.Utils.GetTimestamp() + 600,
         contactType = contactType,
         initiator = 'admin',
     }

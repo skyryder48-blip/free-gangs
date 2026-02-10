@@ -29,7 +29,10 @@ local function Initialize()
     -- Wait for database to be ready
     MySQL.ready(function()
         FreeGangs.Utils.Log('Database connection established')
-        
+
+        -- Initialize FiveM-compatible server time (must happen before any GetTimestamp calls)
+        FreeGangs.Utils.InitServerTime()
+
         -- Run database migrations/setup
         FreeGangs.Server.DB.Initialize()
         
@@ -152,12 +155,21 @@ function FreeGangs.Server.StartBackgroundTasks()
         end
     end)
     
-    -- Heat decay task
+    -- Gang heat decay task (uses sophisticated time-based decay from heat module)
     CreateThread(function()
         local decayInterval = FreeGangs.Config.Heat.GangDecayMinutes * 60 * 1000
         while true do
             Wait(decayInterval)
-            FreeGangs.Server.ProcessHeatDecay()
+            FreeGangs.Server.Heat.ProcessDecay()
+        end
+    end)
+
+    -- Player heat decay task
+    CreateThread(function()
+        local decayInterval = FreeGangs.Config.Heat.IndividualDecayMinutes * 60 * 1000
+        while true do
+            Wait(decayInterval)
+            FreeGangs.Server.Heat.ProcessPlayerDecay()
         end
     end)
     
@@ -223,38 +235,34 @@ function FreeGangs.Server.ProcessReputationDecay()
     FreeGangs.Utils.Debug('Processed reputation decay for all gangs')
 end
 
----Process heat decay between gangs
-function FreeGangs.Server.ProcessHeatDecay()
-    local decayRate = FreeGangs.Config.Heat.GangDecayRate
+---Process territory influence decay
+function FreeGangs.Server.ProcessTerritoryDecay()
+    local decayPercent = FreeGangs.Config.Territory.DecayPercentage
     
-    for key, heatData in pairs(FreeGangs.Server.Heat) do
-        if heatData.heat_level > 0 then
-            local newHeat = math.max(0, heatData.heat_level - decayRate)
-            
-            if newHeat ~= heatData.heat_level then
-                local oldStage = FreeGangs.Utils.GetHeatStage(heatData.heat_level)
-                local newStage = FreeGangs.Utils.GetHeatStage(newHeat)
-                
-                heatData.heat_level = newHeat
-                heatData.stage = newStage
-                
-                -- Mark for database update
-                FreeGangs.Server.Cache.MarkDirty('heat', key)
-                
-                -- Notify if stage changed
-                if newStage ~= oldStage then
-                    FreeGangs.Server.OnHeatStageChange(heatData.gang_a, heatData.gang_b, oldStage, newStage)
-                end
+    for zoneName, territory in pairs(FreeGangs.Server.Territories) do
+        local influence = territory.influence or {}
+        local changed = false
+        
+        for gangName, percent in pairs(influence) do
+            local newPercent = math.max(0, percent - decayPercent)
+            if newPercent ~= percent then
+                influence[gangName] = newPercent > 0 and newPercent or nil
+                changed = true
             end
+        end
+        
+        if changed then
+            FreeGangs.Server.UpdateTerritoryInfluence(zoneName, influence)
         end
     end
     
-    FreeGangs.Utils.Debug('Processed heat decay')
+    FreeGangs.Utils.Debug('Processed territory decay')
 end
+
 
 ---Process bribe payment deadlines
 function FreeGangs.Server.ProcessBribePayments()
-    local currentTime = os.time()
+    local currentTime = FreeGangs.Utils.GetTimestamp()
     
     for gangName, bribes in pairs(FreeGangs.Server.Bribes) do
         for contactType, bribe in pairs(bribes) do
@@ -275,7 +283,7 @@ end
 
 ---Cleanup expired cooldowns
 function FreeGangs.Server.CleanupCooldowns()
-    local currentTime = os.time()
+    local currentTime = FreeGangs.Utils.GetTimestamp()
     
     for source, cooldowns in pairs(FreeGangs.Server.PlayerCooldowns) do
         for cooldownType, expiry in pairs(cooldowns) do
@@ -355,7 +363,7 @@ function FreeGangs.Server.SetCooldown(source, cooldownType, durationSeconds)
     if not FreeGangs.Server.PlayerCooldowns[source] then
         FreeGangs.Server.PlayerCooldowns[source] = {}
     end
-    FreeGangs.Server.PlayerCooldowns[source][cooldownType] = os.time() + durationSeconds
+    FreeGangs.Server.PlayerCooldowns[source][cooldownType] = FreeGangs.Utils.GetTimestamp() + durationSeconds
 end
 
 ---Check if a player is on cooldown
@@ -369,7 +377,7 @@ function FreeGangs.Server.IsOnCooldown(source, cooldownType)
         return false, nil
     end
     
-    local remaining = cooldowns[cooldownType] - os.time()
+    local remaining = cooldowns[cooldownType] - FreeGangs.Utils.GetTimestamp()
     if remaining > 0 then
         return true, remaining
     end
@@ -490,26 +498,6 @@ function FreeGangs.Server.OnLevelChange(gangName, oldLevel, newLevel)
     ))
 end
 
----Handle heat stage change events
----@param gangA string
----@param gangB string
----@param oldStage string
----@param newStage string
-function FreeGangs.Server.OnHeatStageChange(gangA, gangB, oldStage, newStage)
-    local gangAData = FreeGangs.Server.Gangs[gangA]
-    local gangBData = FreeGangs.Server.Gangs[gangB]
-    
-    if not gangAData or not gangBData then return end
-    
-    local stageInfo = FreeGangs.HeatStageThresholds[newStage]
-    
-    -- Notify both gangs
-    local message = string.format(FreeGangs.Config.Messages.StageChanged, gangBData.label, stageInfo.label)
-    FreeGangs.Bridge.NotifyGang(gangA, message, 'warning')
-    
-    message = string.format(FreeGangs.Config.Messages.StageChanged, gangAData.label, stageInfo.label)
-    FreeGangs.Bridge.NotifyGang(gangB, message, 'warning')
-end
 
 -- ============================================================================
 -- DISCORD WEBHOOK
@@ -529,7 +517,7 @@ function FreeGangs.Server.SendDiscordWebhook(title, message, color)
             description = message,
             color = color or 16711680, -- Red
             footer = {
-                text = os.date('%Y-%m-%d %H:%M:%S')
+                text = FreeGangs.Utils.FormatTime(FreeGangs.Utils.GetTimestamp())
             }
         }
     }
