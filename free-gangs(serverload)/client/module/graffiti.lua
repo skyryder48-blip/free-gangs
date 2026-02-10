@@ -62,14 +62,14 @@ end
 -- SCALEFORM AVAILABILITY CHECK
 -- ============================================================================
 
----Check if generic_texture_renderer scaleform is available
+---Check if generic_texture_renderer scaleform is available (bundled in stream/)
 ---@return boolean
 local function IsScaleformAvailable()
     if scaleformAvailable ~= nil then
         return scaleformAvailable
     end
 
-    -- Try to load the scaleform
+    -- Try to load the scaleform (bundled in stream/generic_texture_renderer.gfx)
     local sf = RequestScaleformMovie('generic_texture_renderer')
     local timeout = 0
     while not HasScaleformMovieLoaded(sf) and timeout < 100 do
@@ -82,8 +82,8 @@ local function IsScaleformAvailable()
         scaleformAvailable = true
     else
         scaleformAvailable = false
-        FreeGangs.Utils.Log('[Graffiti] WARNING: generic_texture_renderer_gfx resource not found. Graffiti rendering disabled.')
-        FreeGangs.Utils.Log('[Graffiti] Install from: https://forum.cfx.re/t/release-generic-dui-2d-3d-renderer/131208')
+        FreeGangs.Utils.Log('[Graffiti] WARNING: generic_texture_renderer scaleform failed to load. Graffiti rendering disabled.')
+        FreeGangs.Utils.Log('[Graffiti] Ensure stream/generic_texture_renderer.gfx exists in the resource.')
     end
 
     return scaleformAvailable
