@@ -251,6 +251,14 @@ FreeGangs.Locale.en = {
         protection_rivalry_blocked = 'Protection suspended due to gang rivalry',
         protection_fail_cooldown = 'Failed recently - wait before trying again',
         protection_no_businesses = 'No extortable businesses in this area',
+
+        -- Protection Robbery
+        protection_robbery_success = 'Robbery successful! Grabbed %s from their protection racket',
+        protection_robbery_fail = 'The robbery went sideways - you came away empty-handed',
+        protection_robbery_need_control = 'Your gang needs at least 30%% zone control to pull this off',
+        protection_robbery_disabled = 'Protection robbery is disabled',
+        protection_robbery_alert = 'Someone tried to rob your protection at %s!',
+        protection_robbery_victim = 'Your protection at %s has been robbed!',
     },
     
     -- ========================================================================

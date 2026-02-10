@@ -1432,6 +1432,180 @@ function FreeGangs.Server.Activities.TakeoverProtection(source, businessId)
     }
 end
 
+-- In-memory cooldowns for robbery attempts per business: { [businessId] = { [gangName] = timestamp } }
+local robberyBusinessCooldowns = {}
+
+---Rob a rival gang's protection payout from a business
+---Requires 30% zone control (not majority). Steals money, triggers major heat.
+---@param source number Player source
+---@param businessId string Business ID
+---@return boolean success
+---@return string message
+---@return table|nil result
+function FreeGangs.Server.Activities.RobProtection(source, businessId)
+    local citizenid = FreeGangs.Bridge.GetCitizenId(source)
+    if not citizenid then return false, FreeGangs.L('errors', 'not_loaded'), nil end
+
+    local gangData = FreeGangs.Server.GetPlayerGangData(source)
+    if not gangData then return false, FreeGangs.L('gangs', 'not_in_gang'), nil end
+
+    local config = GetProtectionConfig()
+    local robberyConfig = config.Robbery or {}
+
+    if not robberyConfig.Enabled then
+        return false, FreeGangs.L('activities', 'protection_robbery_disabled'), nil
+    end
+
+    if not FreeGangs.Server.HasPermission(source, FreeGangs.Permissions.COLLECT_PROTECTION) then
+        return false, FreeGangs.L('general', 'no_permission'), nil
+    end
+
+    -- Validate business exists
+    local bizConfig = FindBusinessConfig(businessId)
+    if not bizConfig then return false, FreeGangs.L('activities', 'invalid_target'), nil end
+
+    -- Validate proximity
+    if not ValidateProtectionProximity(source, bizConfig.coords, config.RegistrationDistance or 5.0) then
+        return false, FreeGangs.L('activities', 'protection_too_far'), nil
+    end
+
+    -- Get existing protection (must be owned by a rival)
+    local existing = FreeGangs.Server.DB.GetBusinessProtection(businessId)
+    if not existing or existing.status ~= 'active' then
+        return false, FreeGangs.L('activities', 'invalid_target'), nil
+    end
+
+    if existing.gang_name == gangData.gang.name then
+        return false, FreeGangs.L('activities', 'protection_already_yours'), nil
+    end
+
+    local rivalGang = existing.gang_name
+    local zoneName = bizConfig.zone
+
+    -- Check zone control meets the ROBBERY minimum (30%, not 51%)
+    local gangInfluence = FreeGangs.Server.Territory.GetInfluence(zoneName, gangData.gang.name) or 0
+    local minControl = robberyConfig.MinControlForRobbery or 30
+    if gangInfluence < minControl then
+        return false, FreeGangs.L('activities', 'protection_robbery_need_control'), nil
+    end
+
+    -- Check player cooldown
+    local playerCooldown = FreeGangs.Server.GetCooldownRemaining(source, 'protection_robbery')
+    if playerCooldown > 0 then
+        return false, FreeGangs.L('activities', 'on_cooldown', FreeGangs.Utils.FormatDuration(playerCooldown * 1000)), nil
+    end
+
+    -- Check per-business cooldown
+    local now = FreeGangs.Utils.GetTimestamp()
+    local bizCooldown = robberyConfig.CooldownPerBusiness or 3600
+    local bizCooldowns = robberyBusinessCooldowns[businessId]
+    if bizCooldowns and bizCooldowns[gangData.gang.name] then
+        local elapsed = now - bizCooldowns[gangData.gang.name]
+        if elapsed < bizCooldown then
+            return false, FreeGangs.L('activities', 'on_cooldown', FreeGangs.Utils.FormatDuration((bizCooldown - elapsed) * 1000)), nil
+        end
+    end
+
+    -- Calculate success chance
+    local base = robberyConfig.BaseSuccessChance or 45
+    local controlBonus = math.max(0, (gangInfluence - minControl) * (robberyConfig.ControlBonus or 0.6))
+    local heatLevel = FreeGangs.Server.Heat.Get(gangData.gang.name, rivalGang) or 0
+    local heatPenalty = heatLevel * (robberyConfig.HeatPenaltyPerPoint or 0.2)
+
+    local chance = FreeGangs.Utils.Clamp(base + controlBonus - heatPenalty, 5, 95)
+
+    local factors = {
+        base = base,
+        controlBonus = FreeGangs.Utils.Round(controlBonus, 1),
+        heatPenalty = FreeGangs.Utils.Round(heatPenalty, 1),
+        final = FreeGangs.Utils.Round(chance, 1),
+    }
+
+    -- Roll the dice
+    local roll = math.random(100)
+    local success = roll <= chance
+
+    -- Set cooldowns regardless of outcome
+    FreeGangs.Server.SetCooldown(source, 'protection_robbery', robberyConfig.PlayerCooldown or 900)
+    robberyBusinessCooldowns[businessId] = robberyBusinessCooldowns[businessId] or {}
+    robberyBusinessCooldowns[businessId][gangData.gang.name] = now
+
+    if not success then
+        -- Failed: still generates heat (attempted robbery is still provocative)
+        local failHeat = robberyConfig.FailHeatGenerated or 15
+        AddHeat(gangData.gang.name, rivalGang, failHeat, 'protection_robbery_attempt')
+        FreeGangs.Server.AddPlayerHeat(citizenid, math.floor(failHeat / 2))
+
+        -- Notify the rival gang that someone tried to rob their protection
+        FreeGangs.Bridge.NotifyGang(rivalGang,
+            string.format(FreeGangs.L('activities', 'protection_robbery_alert'), bizConfig.label),
+            'warning')
+
+        FreeGangs.Server.DB.Log(gangData.gang.name, citizenid, 'protection_robbery_failed', FreeGangs.LogCategories.ACTIVITY, {
+            business_id = businessId, rival = rivalGang, zone = zoneName,
+            chance = chance, roll = roll, factors = factors,
+        })
+
+        return false, FreeGangs.L('activities', 'protection_robbery_fail'), { chance = chance, factors = factors }
+    end
+
+    -- Success: steal the protection payout
+    local basePayout = existing.payout_base or 500
+    local payoutPercent = robberyConfig.PayoutPercent or 0.75
+    local stolenAmount = math.floor(basePayout * payoutPercent)
+
+    -- Give money to the robber
+    FreeGangs.Bridge.AddMoney(source, stolenAmount, 'cash', 'protection-robbery')
+
+    -- Generate major inter-gang heat
+    local robberyHeat = robberyConfig.HeatGenerated or 35
+    AddHeat(gangData.gang.name, rivalGang, robberyHeat, 'protection_robbery')
+
+    -- Activity rewards (rep, influence, player heat)
+    local activityPoints = FreeGangs.ActivityPoints[FreeGangs.Activities.PROTECTION_ROBBERY]
+    FreeGangs.Server.AddGangReputation(gangData.gang.name, activityPoints.masterRep, citizenid, 'protection_robbery')
+    if zoneName then
+        AddZoneInfluence(zoneName, gangData.gang.name, activityPoints.zoneInfluence)
+    end
+    FreeGangs.Server.AddPlayerHeat(citizenid, activityPoints.heat)
+
+    -- Notify the rival gang
+    FreeGangs.Bridge.NotifyGang(rivalGang,
+        string.format(FreeGangs.L('activities', 'protection_robbery_victim'), bizConfig.label),
+        'error')
+
+    -- Record crime stat + dispatch (high severity - this is a bold move)
+    RecordCrimeStat(citizenid, 'protection_robbery', { cash = stolenAmount })
+    TriggerDispatch(source, 'robbery', 4, { business = bizConfig.label })
+
+    FreeGangs.Server.DB.Log(gangData.gang.name, citizenid, 'protection_robbery', FreeGangs.LogCategories.ACTIVITY, {
+        business_id = businessId, rival = rivalGang, zone = zoneName,
+        chance = chance, roll = roll, factors = factors,
+        stolen = stolenAmount, heat = robberyHeat,
+    })
+
+    -- Discord webhook for the bold robbery
+    FreeGangs.Server.SendDiscordWebhook('Protection Robbery',
+        string.format('**%s** robbed **%s** protection from **%s** in %s (+%d heat)',
+            gangData.gang.label or gangData.gang.name,
+            rivalGang,
+            bizConfig.label,
+            zoneName,
+            robberyHeat
+        ),
+        16744448 -- Orange color
+    )
+
+    return true, FreeGangs.L('activities', 'protection_robbery_success', FreeGangs.Bridge.FormatMoney(stolenAmount)), {
+        business = bizConfig.label,
+        rival = rivalGang,
+        stolen = stolenAmount,
+        chance = chance,
+        rep = activityPoints.masterRep,
+        heat = activityPoints.heat + robberyHeat,
+    }
+end
+
 ---Get available businesses for a zone (with status info)
 ---@param gangName string
 ---@param zoneName string
