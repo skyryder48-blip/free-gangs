@@ -873,81 +873,231 @@ end
 -- PROTECTION RACKET SYSTEM
 -- ============================================================================
 
----Open protection collection menu for current location
-function FreeGangs.Client.Activities.OpenProtectionMenu()
-    if isPerformingActivity then return end
-    
-    -- Get protection businesses
-    local businesses = lib.callback.await(FreeGangs.Callbacks.GET_PROTECTION_BUSINESSES, false)
-    
-    if not businesses or #businesses == 0 then
-        FreeGangs.Bridge.Notify('No protection businesses registered', 'inform')
-        return
-    end
-    
-    local options = {}
-    
-    for _, business in pairs(businesses) do
-        local status = business.isReady and 'Ready' or FreeGangs.Utils.FormatDuration(business.timeRemaining * 1000)
-        
-        options[#options + 1] = {
-            title = business.business_label or business.business_id,
-            description = 'Base payout: $' .. business.payout_base .. ' | Status: ' .. status,
-            icon = business.isReady and 'hand-holding-dollar' or 'clock',
-            disabled = not business.isReady,
-            onSelect = function()
-                FreeGangs.Client.Activities.CollectProtection(business)
-            end,
-        }
-    end
-    
-    lib.registerContext({
-        id = 'freegangs_protection_menu',
-        title = 'Protection Racket',
-        options = options,
-    })
-    
-    lib.showContext('freegangs_protection_menu')
+-- Local state for protection ox_target zones
+local protectionTargetZones = {}  -- businessId -> ox_target zone id
+local protectionPeds = {}         -- businessId -> ped handle (NPC shops only)
+local currentZoneBusinesses = nil -- cached businesses for current zone
+
+---Get protection config from shared config
+---@return table
+local function GetProtectionConfig()
+    return FreeGangs.Config.Activities.Protection or {}
 end
 
----Collect protection from a business
----@param business table Business data
-function FreeGangs.Client.Activities.CollectProtection(business)
+---Try to load animation dict with fallback
+---@param animConfig table { dict, anim, fallbackDict, fallbackAnim }
+---@return string dict, string anim
+local function ResolveAnim(animConfig)
+    if animConfig.dict and DoesAnimDictExist(animConfig.dict) then
+        lib.requestAnimDict(animConfig.dict)
+        return animConfig.dict, animConfig.anim
+    end
+    if animConfig.fallbackDict then
+        lib.requestAnimDict(animConfig.fallbackDict)
+        return animConfig.fallbackDict, animConfig.fallbackAnim or animConfig.anim
+    end
+    lib.requestAnimDict('mp_common')
+    return 'mp_common', 'givetake1_a'
+end
+
+---Spawn a temporary NPC ped at coords for interaction
+---@param model string Ped model name
+---@param coords vector3 Spawn location
+---@param heading number|nil
+---@return number|nil pedHandle
+local function SpawnBusinessPed(model, coords, heading)
+    local hash = type(model) == 'string' and GetHashKey(model) or model
+    lib.requestModel(hash, 5000)
+    if not HasModelLoaded(hash) then return nil end
+
+    local ped = CreatePed(4, hash, coords.x, coords.y, coords.z - 1.0, heading or 0.0, false, true)
+    if not DoesEntityExist(ped) then
+        SetModelAsNoLongerNeeded(hash)
+        return nil
+    end
+
+    SetEntityInvincible(ped, true)
+    SetBlockingOfNonTemporaryEvents(ped, true)
+    FreezeEntityPosition(ped, true)
+    SetModelAsNoLongerNeeded(hash)
+
+    return ped
+end
+
+---Delete a spawned business ped
+---@param businessId string
+local function DeleteBusinessPed(businessId)
+    local ped = protectionPeds[businessId]
+    if ped and DoesEntityExist(ped) then
+        DeleteEntity(ped)
+    end
+    protectionPeds[businessId] = nil
+end
+
+---Remove all protection target zones and peds
+function FreeGangs.Client.Activities.ClearProtectionTargets()
+    for businessId, zoneId in pairs(protectionTargetZones) do
+        exports.ox_target:removeZone(zoneId)
+        DeleteBusinessPed(businessId)
+    end
+    protectionTargetZones = {}
+    protectionPeds = {}
+    currentZoneBusinesses = nil
+end
+
+---Perform intimidation/registration at a business
+---@param business table Business data from server
+local function StartRegistration(business)
     if isPerformingActivity then return end
-    
     SetBusy(true)
-    
-    -- Animation
-    PlayAnim('anim@amb@nightclub@mini@drinking@drinking_shots@ped_a@', 'idle_a', 3000, 49)
-    
+
+    local config = GetProtectionConfig()
+    local intimConfig = config.Intimidation or {}
+
+    -- Notify server of start (anti-cheat tracking)
+    TriggerServerEvent('freegangs:server:startProtection', business.id, 'register')
+
+    -- Spawn NPC if this is an NPC shop
+    local npcPed = nil
+    if business.type == 'npc_shop' and business.pedModel then
+        npcPed = SpawnBusinessPed(business.pedModel, vector3(business.coords.x, business.coords.y, business.coords.z))
+        if npcPed then
+            -- Face the player
+            local ped = FreeGangs.Client.GetPlayerPed()
+            TaskTurnPedToFaceEntity(npcPed, ped, 1000)
+            Wait(500)
+        end
+    end
+
+    -- Player faces the business location
+    local ped = FreeGangs.Client.GetPlayerPed()
+    TaskTurnPedToFaceCoord(ped, business.coords.x, business.coords.y, business.coords.z, 1000)
+    Wait(500)
+
+    -- Intimidation animation
+    local animDict, animClip = ResolveAnim(intimConfig.Animation or { dict = 'mp_common', anim = 'givetake1_a' })
+    PlayAnim(animDict, animClip, -1, 49)
+
+    local duration = intimConfig.Duration or 8000
     local success = lib.progressBar({
-        duration = 3000,
-        label = 'Collecting protection...',
+        duration = duration,
+        label = 'Intimidating the owner...',
         useWhileDead = false,
         canCancel = true,
-        disable = {
-            move = true,
-            car = true,
-            combat = true,
-        },
+        disable = { move = true, car = true, combat = true },
     })
-    
+
     StopAnim()
-    
+
+    if success then
+        local regSuccess, message, result = lib.callback.await(
+            'freegangs:activities:registerProtection', false, business.id
+        )
+
+        if regSuccess then
+            FreeGangs.Bridge.Notify(message, 'success')
+            if result and result.rep and result.rep > 0 then
+                FreeGangs.Bridge.Notify('+' .. result.rep .. ' reputation', 'inform', 3000)
+            end
+
+            -- NPC reacts scared
+            if npcPed and DoesEntityExist(npcPed) then
+                TriggerNPCReaction(npcPed, 'hands_up')
+            end
+        else
+            FreeGangs.Bridge.Notify(message, 'error')
+
+            -- NPC shakes head
+            if npcPed and DoesEntityExist(npcPed) then
+                local reactions = intimConfig.OwnerReactions
+                if reactions and reactions.resistant then
+                    lib.requestAnimDict(reactions.resistant.dict)
+                    TaskPlayAnim(npcPed, reactions.resistant.dict, reactions.resistant.anim,
+                        8.0, -8.0, reactions.resistant.duration or 2000, 49, 0, false, false, false)
+                end
+            end
+        end
+    else
+        FreeGangs.Bridge.Notify('Cancelled', 'warning')
+    end
+
+    -- Clean up NPC after delay
+    if npcPed then
+        CreateThread(function()
+            Wait(3000)
+            if DoesEntityExist(npcPed) then DeleteEntity(npcPed) end
+        end)
+    end
+
+    SetBusy(false)
+end
+
+---Collect protection money from a business
+---@param business table Business data from server
+local function StartCollection(business)
+    if isPerformingActivity then return end
+    SetBusy(true)
+
+    local config = GetProtectionConfig()
+
+    -- Notify server of start (anti-cheat tracking)
+    TriggerServerEvent('freegangs:server:startProtection', business.id, 'collect')
+
+    -- Different animation based on business type
+    local npcPed = nil
+    local duration
+    local label = 'Collecting protection money...'
+
+    if business.type == 'npc_shop' and business.pedModel then
+        -- NPC business: spawn ped, play full interaction animation
+        npcPed = SpawnBusinessPed(business.pedModel, vector3(business.coords.x, business.coords.y, business.coords.z))
+        if npcPed then
+            local ped = FreeGangs.Client.GetPlayerPed()
+            TaskTurnPedToFaceEntity(npcPed, ped, 800)
+            Wait(400)
+        end
+
+        local animConfig = config.Collection and config.Collection.NpcAnimation or {}
+        local animDict = animConfig.dict or 'mp_common'
+        local animClip = animConfig.anim or 'givetake1_a'
+        duration = animConfig.duration or 3000
+        lib.requestAnimDict(animDict)
+        PlayAnim(animDict, animClip, duration, animConfig.flag or 49)
+        label = '"Here\'s your payment..."'
+    else
+        -- Player business or no ped: simplified collection
+        local animConfig = config.Collection and config.Collection.TargetAnimation or {}
+        local animDict, animClip = ResolveAnim(animConfig)
+        duration = animConfig.duration or 2500
+        PlayAnim(animDict, animClip, duration, animConfig.flag or 49)
+        label = 'Picking up payment...'
+    end
+
+    local success = lib.progressBar({
+        duration = duration,
+        label = label,
+        useWhileDead = false,
+        canCancel = true,
+        disable = { move = true, car = true, combat = true },
+    })
+
+    StopAnim()
+
     if success then
         local collectSuccess, message, rewards = lib.callback.await(
-            'freegangs:activities:collectProtection', 
-            false, 
-            business.business_id
+            'freegangs:activities:collectProtection', false, business.id
         )
-        
+
         if collectSuccess then
             FreeGangs.Bridge.Notify(message, 'success')
-            
-            if rewards then
-                if rewards.rep and rewards.rep > 0 then
-                    FreeGangs.Bridge.Notify('+' .. rewards.rep .. ' reputation', 'inform', 3000)
-                end
+            if rewards and rewards.rep and rewards.rep > 0 then
+                FreeGangs.Bridge.Notify('+' .. rewards.rep .. ' reputation', 'inform', 3000)
+            end
+
+            -- NPC hands over envelope animation
+            if npcPed and DoesEntityExist(npcPed) then
+                lib.requestAnimDict('mp_common')
+                TaskPlayAnim(npcPed, 'mp_common', 'givetake1_b', 8.0, -8.0, 2000, 49, 0, false, false, false)
             end
         else
             FreeGangs.Bridge.Notify(message, 'error')
@@ -955,8 +1105,215 @@ function FreeGangs.Client.Activities.CollectProtection(business)
     else
         FreeGangs.Bridge.Notify('Collection cancelled', 'warning')
     end
-    
+
+    -- Clean up NPC
+    if npcPed then
+        CreateThread(function()
+            Wait(3000)
+            if DoesEntityExist(npcPed) then DeleteEntity(npcPed) end
+        end)
+    end
+
     SetBusy(false)
+end
+
+---Takeover a rival-protected business
+---@param business table Business data from server
+local function StartTakeover(business)
+    if isPerformingActivity then return end
+    SetBusy(true)
+
+    local config = GetProtectionConfig()
+    local takeoverConfig = config.Takeover or {}
+
+    -- Notify server of start (anti-cheat tracking)
+    TriggerServerEvent('freegangs:server:startProtection', business.id, 'takeover')
+
+    -- Spawn NPC if applicable
+    local npcPed = nil
+    if business.type == 'npc_shop' and business.pedModel then
+        npcPed = SpawnBusinessPed(business.pedModel, vector3(business.coords.x, business.coords.y, business.coords.z))
+        if npcPed then
+            local ped = FreeGangs.Client.GetPlayerPed()
+            TaskTurnPedToFaceEntity(npcPed, ped, 800)
+            Wait(400)
+        end
+    end
+
+    -- Face target
+    local ped = FreeGangs.Client.GetPlayerPed()
+    TaskTurnPedToFaceCoord(ped, business.coords.x, business.coords.y, business.coords.z, 1000)
+    Wait(500)
+
+    -- Takeover animation (more aggressive)
+    local animConfig = takeoverConfig.Animation or { dict = 'mp_missheist_countrybank@aim', anim = 'aim_loop' }
+    local animDict, animClip = ResolveAnim(animConfig)
+    PlayAnim(animDict, animClip, -1, animConfig.flag or 49)
+
+    local duration = takeoverConfig.Duration or 12000
+    local success = lib.progressBar({
+        duration = duration,
+        label = '"You\'re paying us now..."',
+        useWhileDead = false,
+        canCancel = true,
+        disable = { move = true, car = true, combat = true },
+    })
+
+    StopAnim()
+
+    if success then
+        local takeSuccess, message, result = lib.callback.await(
+            'freegangs:activities:takeoverProtection', false, business.id
+        )
+
+        if takeSuccess then
+            FreeGangs.Bridge.Notify(message, 'success')
+            if result and result.rep and result.rep > 0 then
+                FreeGangs.Bridge.Notify('+' .. result.rep .. ' reputation', 'inform', 3000)
+            end
+
+            if npcPed and DoesEntityExist(npcPed) then
+                TriggerNPCReaction(npcPed, 'hands_up')
+            end
+        else
+            FreeGangs.Bridge.Notify(message, 'error')
+
+            if npcPed and DoesEntityExist(npcPed) then
+                lib.requestAnimDict('gestures@m@standing@casual')
+                TaskPlayAnim(npcPed, 'gestures@m@standing@casual', 'gesture_head_no',
+                    8.0, -8.0, 2000, 49, 0, false, false, false)
+            end
+        end
+    else
+        FreeGangs.Bridge.Notify('Cancelled', 'warning')
+    end
+
+    if npcPed then
+        CreateThread(function()
+            Wait(3000)
+            if DoesEntityExist(npcPed) then DeleteEntity(npcPed) end
+        end)
+    end
+
+    SetBusy(false)
+end
+
+---Create ox_target zones for businesses in the current zone
+---@param zoneName string Territory zone name
+function FreeGangs.Client.Activities.LoadZoneProtection(zoneName)
+    -- Clear any existing zones first
+    FreeGangs.Client.Activities.ClearProtectionTargets()
+
+    -- Fetch business data from server (includes status, protection info)
+    local businesses = lib.callback.await(FreeGangs.Callbacks.GET_ZONE_BUSINESSES, false, zoneName)
+    if not businesses or #businesses == 0 then return end
+
+    currentZoneBusinesses = businesses
+
+    local config = GetProtectionConfig()
+    local regDist = config.RegistrationDistance or 5.0
+    local collectDist = config.CollectionDistance or 10.0
+
+    for _, biz in ipairs(businesses) do
+        local options = {}
+
+        if biz.status == 'unprotected' then
+            -- Can register
+            options[#options + 1] = {
+                name = 'freegangs_protect_' .. biz.id,
+                icon = 'fa-solid fa-shield-halved',
+                label = 'Propose Protection',
+                canInteract = function()
+                    return not isPerformingActivity
+                end,
+                onSelect = function()
+                    StartRegistration(biz)
+                end,
+                distance = regDist,
+            }
+        elseif biz.status == 'owned' then
+            -- Can collect
+            local statusText = biz.isReady and 'Ready' or ('Next: ' .. FreeGangs.Utils.FormatDuration(biz.timeRemaining * 1000))
+            options[#options + 1] = {
+                name = 'freegangs_collect_' .. biz.id,
+                icon = biz.isReady and 'fa-solid fa-hand-holding-dollar' or 'fa-solid fa-clock',
+                label = 'Collect Protection (' .. statusText .. ')',
+                canInteract = function()
+                    return not isPerformingActivity and biz.isReady
+                end,
+                onSelect = function()
+                    StartCollection(biz)
+                end,
+                distance = collectDist,
+            }
+        elseif biz.status == 'rival' then
+            -- Can takeover
+            local takeoverEnabled = config.Takeover and config.Takeover.Enabled
+            if takeoverEnabled then
+                options[#options + 1] = {
+                    name = 'freegangs_takeover_' .. biz.id,
+                    icon = 'fa-solid fa-skull-crossbones',
+                    label = 'Muscle In (Protected by ' .. (biz.protector or 'unknown') .. ')',
+                    canInteract = function()
+                        return not isPerformingActivity
+                    end,
+                    onSelect = function()
+                        StartTakeover(biz)
+                    end,
+                    distance = regDist,
+                }
+            end
+        end
+
+        if #options > 0 then
+            local zoneId = exports.ox_target:addSphereZone({
+                coords = vector3(biz.coords.x, biz.coords.y, biz.coords.z),
+                radius = 1.5,
+                options = options,
+                debug = FreeGangs.Config.General.Debug,
+            })
+            protectionTargetZones[biz.id] = zoneId
+        end
+    end
+
+    FreeGangs.Utils.Debug('Loaded', FreeGangs.Utils.TableLength(protectionTargetZones), 'protection targets for zone:', zoneName)
+end
+
+---Open protection overview menu (shows all gang businesses with status)
+function FreeGangs.Client.Activities.OpenProtectionMenu()
+    if isPerformingActivity then return end
+
+    local businesses = lib.callback.await(FreeGangs.Callbacks.GET_PROTECTION_BUSINESSES, false)
+
+    if not businesses or #businesses == 0 then
+        FreeGangs.Bridge.Notify(FreeGangs.L('activities', 'protection_no_businesses'), 'inform')
+        return
+    end
+
+    local options = {}
+
+    for _, business in pairs(businesses) do
+        local status = business.isReady and 'Ready' or FreeGangs.Utils.FormatDuration(business.timeRemaining * 1000)
+
+        options[#options + 1] = {
+            title = business.business_label or business.business_id,
+            description = 'Payout: $' .. (business.payout_base or 0) .. ' | ' .. status,
+            icon = business.isReady and 'hand-holding-dollar' or 'clock',
+            disabled = true, -- View-only: must go to physical location to collect
+            metadata = {
+                { label = 'Zone', value = business.zone_name or 'Unknown' },
+                { label = 'Status', value = business.isReady and 'Ready to collect' or 'On cooldown' },
+            },
+        }
+    end
+
+    lib.registerContext({
+        id = 'freegangs_protection_menu',
+        title = 'Protection Racket',
+        options = options,
+    })
+
+    lib.showContext('freegangs_protection_menu')
 end
 
 -- ============================================================================

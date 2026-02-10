@@ -768,56 +768,85 @@ end
 -- PROTECTION QUERIES
 -- ============================================================================
 
----Get gang's protection rackets
+---Get gang's active protection rackets
 ---@param gangName string
 ---@return table
 function FreeGangs.Server.DB.GetGangProtection(gangName)
     local result = MySQL.query.await([[
-        SELECT 
+        SELECT
             id, gang_name, business_id, business_label, zone_name, coords,
-            payout_base, established_by, last_collection, status
+            payout_base, business_type, established_by, last_collection,
+            last_takeover, status
         FROM freegangs_protection
         WHERE gang_name = ? AND status = 'active'
     ]], { gangName })
-    
+
     local protection = {}
     for _, row in pairs(result or {}) do
         row.coords = row.coords and json.decode(row.coords) or {}
         protection[#protection + 1] = row
     end
-    
+
     return protection
 end
 
----Get protection in zone
+---Get protection in zone (all statuses)
 ---@param zoneName string
 ---@return table
 function FreeGangs.Server.DB.GetZoneProtection(zoneName)
     local result = MySQL.query.await([[
-        SELECT 
+        SELECT
             id, gang_name, business_id, business_label, zone_name, coords,
-            payout_base, established_by, last_collection, status
+            payout_base, business_type, established_by, last_collection,
+            last_takeover, status
         FROM freegangs_protection
         WHERE zone_name = ?
     ]], { zoneName })
-    
+
     local protection = {}
     for _, row in pairs(result or {}) do
         row.coords = row.coords and json.decode(row.coords) or {}
         protection[#protection + 1] = row
     end
-    
+
     return protection
 end
 
----Register protection
+---Get protection record for a specific business
+---@param businessId string
+---@return table|nil
+function FreeGangs.Server.DB.GetBusinessProtection(businessId)
+    local row = MySQL.single.await([[
+        SELECT
+            id, gang_name, business_id, business_label, zone_name, coords,
+            payout_base, business_type, established_by, last_collection,
+            last_takeover, status
+        FROM freegangs_protection
+        WHERE business_id = ?
+    ]], { businessId })
+
+    if row then
+        row.coords = row.coords and json.decode(row.coords) or {}
+    end
+
+    return row
+end
+
+---Register protection (new business)
 ---@param data table
 ---@return number|nil
 function FreeGangs.Server.DB.RegisterProtection(data)
     return MySQL.insert.await([[
-        INSERT INTO freegangs_protection (gang_name, business_id, business_label, zone_name, coords, payout_base, established_by)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-        ON DUPLICATE KEY UPDATE gang_name = VALUES(gang_name), status = 'active'
+        INSERT INTO freegangs_protection
+            (gang_name, business_id, business_label, zone_name, coords, payout_base, business_type, established_by)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        ON DUPLICATE KEY UPDATE
+            gang_name = VALUES(gang_name),
+            business_type = VALUES(business_type),
+            established_by = VALUES(established_by),
+            payout_base = VALUES(payout_base),
+            last_takeover = NULL,
+            status = 'active'
     ]], {
         data.gang_name,
         data.business_id,
@@ -825,15 +854,38 @@ function FreeGangs.Server.DB.RegisterProtection(data)
         data.zone_name,
         json.encode(data.coords),
         data.payout_base,
+        data.business_type or 'npc_shop',
         data.established_by,
     })
 end
 
----Update protection collection
+---Transfer protection to a rival gang (takeover)
+---@param businessId string
+---@param newGangName string
+---@param citizenid string
+---@param newPayout number
+function FreeGangs.Server.DB.TransferProtection(businessId, newGangName, citizenid, newPayout)
+    MySQL.update.await([[
+        UPDATE freegangs_protection
+        SET gang_name = ?, established_by = ?, payout_base = ?,
+            last_collection = NULL, last_takeover = CURRENT_TIMESTAMP, status = 'active'
+        WHERE business_id = ?
+    ]], { newGangName, citizenid, newPayout, businessId })
+end
+
+---Update protection collection timestamp
 ---@param businessId string
 function FreeGangs.Server.DB.UpdateProtectionCollection(businessId)
     MySQL.update.await([[
         UPDATE freegangs_protection SET last_collection = CURRENT_TIMESTAMP WHERE business_id = ?
+    ]], { businessId })
+end
+
+---Suspend protection (lost zone control)
+---@param businessId string
+function FreeGangs.Server.DB.SuspendProtection(businessId)
+    MySQL.update.await([[
+        UPDATE freegangs_protection SET status = 'suspended' WHERE business_id = ?
     ]], { businessId })
 end
 

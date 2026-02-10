@@ -13,6 +13,7 @@ local activeMuggings = {}     -- source -> { targetNetId, startTime }
 local activePickpockets = {}  -- source -> { targetNetId, startTime }
 local activeDrugSales = {}    -- source -> { targetNetId, startTime }
 local activeGraffiti = {}     -- source -> { startTime, coords }
+local activeProtection = {}   -- source -> { businessId, action, startTime }
 
 -- ============================================================================
 -- ACTIVITY VALIDATION CALLBACKS
@@ -283,41 +284,88 @@ end)
 -- PROTECTION RACKET CALLBACKS
 -- ============================================================================
 
----Get protection businesses for a gang
+---Get gang's registered businesses (with ready status)
 lib.callback.register(FreeGangs.Callbacks.GET_PROTECTION_BUSINESSES, function(source)
     local gangData = FreeGangs.Server.GetPlayerGangData(source)
     if not gangData then return {} end
-    
+
     local businesses = FreeGangs.Server.Activities.GetGangProtectionBusinesses(gangData.gang.name)
-    
-    -- Add ready status to each business
+
     local now = FreeGangs.Utils.GetTimestamp()
-    local collectionCooldownHours = FreeGangs.Config.Activities.Protection and
-                                    FreeGangs.Config.Activities.Protection.CollectionIntervalHours or 4
+    local collectionCooldownHours = FreeGangs.Config.Activities.Protection
+        and FreeGangs.Config.Activities.Protection.CollectionIntervalHours or 4
     local collectionCooldown = collectionCooldownHours * 3600
-    
+
     for _, business in pairs(businesses) do
         local lastCollection = 0
         if business.last_collection then
             lastCollection = FreeGangs.Utils.ParseTimestamp(business.last_collection) or 0
         end
-        
+
         business.isReady = (now - lastCollection) >= collectionCooldown
         business.nextCollection = lastCollection + collectionCooldown
         business.timeRemaining = business.isReady and 0 or (business.nextCollection - now)
     end
-    
+
     return businesses
 end)
 
----Register protection
-lib.callback.register('freegangs:activities:registerProtection', function(source, businessData)
-    return FreeGangs.Server.Activities.RegisterProtection(source, businessData)
+---Get zone businesses with protection status (for ox_target display)
+lib.callback.register(FreeGangs.Callbacks.GET_ZONE_BUSINESSES, function(source, zoneName)
+    local gangData = FreeGangs.Server.GetPlayerGangData(source)
+    if not gangData then return {} end
+    if not zoneName or type(zoneName) ~= 'string' then return {} end
+
+    return FreeGangs.Server.Activities.GetZoneBusinesses(gangData.gang.name, zoneName)
 end)
 
----Collect protection
+---Register protection (with anti-cheat timing validation)
+lib.callback.register('freegangs:activities:registerProtection', function(source, businessId)
+    if not businessId or type(businessId) ~= 'string' then return false, 'Invalid data' end
+
+    local tracking = activeProtection[source]
+    if not tracking then return false, 'No active protection session' end
+    if tracking.action ~= 'register' then return false, 'Invalid action' end
+    if tracking.businessId ~= businessId then return false, 'Business mismatch' end
+
+    -- Validate minimum time (intimidation duration is 8s by default)
+    local elapsed = FreeGangs.Utils.GetTimestamp() - tracking.startTime
+    if elapsed < 5 then return false, 'Too fast' end
+
+    activeProtection[source] = nil
+    return FreeGangs.Server.Activities.RegisterProtection(source, businessId)
+end)
+
+---Collect protection (with anti-cheat timing validation)
 lib.callback.register('freegangs:activities:collectProtection', function(source, businessId)
+    if not businessId or type(businessId) ~= 'string' then return false, 'Invalid data' end
+
+    local tracking = activeProtection[source]
+    if not tracking then return false, 'No active protection session' end
+    if tracking.action ~= 'collect' then return false, 'Invalid action' end
+    if tracking.businessId ~= businessId then return false, 'Business mismatch' end
+
+    local elapsed = FreeGangs.Utils.GetTimestamp() - tracking.startTime
+    if elapsed < 2 then return false, 'Too fast' end
+
+    activeProtection[source] = nil
     return FreeGangs.Server.Activities.CollectProtection(source, businessId)
+end)
+
+---Takeover protection (with anti-cheat timing validation)
+lib.callback.register('freegangs:activities:takeoverProtection', function(source, businessId)
+    if not businessId or type(businessId) ~= 'string' then return false, 'Invalid data' end
+
+    local tracking = activeProtection[source]
+    if not tracking then return false, 'No active protection session' end
+    if tracking.action ~= 'takeover' then return false, 'Invalid action' end
+    if tracking.businessId ~= businessId then return false, 'Business mismatch' end
+
+    local elapsed = FreeGangs.Utils.GetTimestamp() - tracking.startTime
+    if elapsed < 8 then return false, 'Too fast' end
+
+    activeProtection[source] = nil
+    return FreeGangs.Server.Activities.TakeoverProtection(source, businessId)
 end)
 
 -- ============================================================================
@@ -501,6 +549,16 @@ RegisterNetEvent('freegangs:server:cancelDrugSale', function()
     FreeGangs.Utils.Debug('Player', source, 'cancelled drug sale')
 end)
 
+-- Handle protection start (track for completion validation)
+RegisterNetEvent('freegangs:server:startProtection', function(businessId, action)
+    local source = source
+    local validActions = { register = true, collect = true, takeover = true }
+    if type(businessId) == 'string' and validActions[action] then
+        activeProtection[source] = { businessId = businessId, action = action, startTime = FreeGangs.Utils.GetTimestamp() }
+    end
+    FreeGangs.Utils.Debug('Player', source, 'starting protection', action, 'on', businessId)
+end)
+
 -- Handle graffiti start (track for completion validation)
 RegisterNetEvent('freegangs:server:startGraffiti', function(coords)
     local source = source
@@ -517,6 +575,7 @@ AddEventHandler('playerDropped', function()
     activePickpockets[source] = nil
     activeDrugSales[source] = nil
     activeGraffiti[source] = nil
+    activeProtection[source] = nil
 end)
 
 -- ============================================================================
@@ -551,13 +610,26 @@ if FreeGangs.Config.General.Debug then
         print('[free-gangs:debug] Spray result:', success, message, json.encode(result or {}))
     end, false)
     
-    -- Test protection command
+    -- Test protection command (bypasses anti-cheat timing for debug)
     RegisterCommand('fg_protection', function(source, args)
         if source == 0 then return end
-        
+
         local businessId = args[1] or 'test_business'
-        local success, message, result = FreeGangs.Server.Activities.CollectProtection(source, businessId)
-        
+        local action = args[2] or 'collect' -- collect | register | takeover
+
+        -- Set up anti-cheat tracking so callback doesn't fail
+        activeProtection[source] = { businessId = businessId, action = action, startTime = FreeGangs.Utils.GetTimestamp() - 30 }
+
+        local success, message, result
+        if action == 'register' then
+            success, message, result = FreeGangs.Server.Activities.RegisterProtection(source, businessId)
+        elseif action == 'takeover' then
+            success, message, result = FreeGangs.Server.Activities.TakeoverProtection(source, businessId)
+        else
+            success, message, result = FreeGangs.Server.Activities.CollectProtection(source, businessId)
+        end
+
+        activeProtection[source] = nil
         FreeGangs.Bridge.Notify(source, message, success and 'success' or 'error')
         print('[free-gangs:debug] Protection result:', success, message, json.encode(result or {}))
     end, false)

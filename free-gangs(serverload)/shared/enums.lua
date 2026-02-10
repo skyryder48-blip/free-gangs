@@ -499,6 +499,8 @@ FreeGangs.Activities = {
     GRAFFITI = 'graffiti',
     GRAFFITI_REMOVE = 'graffiti_remove',
     PROTECTION_COLLECT = 'protection_collect',
+    PROTECTION_REGISTER = 'protection_register',
+    PROTECTION_TAKEOVER = 'protection_takeover',
     ZONE_PRESENCE = 'zone_presence',
     RIVAL_KILL = 'rival_kill',
     BRIBE_USE = 'bribe_use',
@@ -548,6 +550,16 @@ FreeGangs.ActivityPoints = {
         masterRep = 15,
         zoneInfluence = 20,
         heat = 12,
+    },
+    [FreeGangs.Activities.PROTECTION_REGISTER] = {
+        masterRep = 25,
+        zoneInfluence = 15,
+        heat = 8,
+    },
+    [FreeGangs.Activities.PROTECTION_TAKEOVER] = {
+        masterRep = 35,
+        zoneInfluence = 25,
+        heat = 20,
     },
     [FreeGangs.Activities.ZONE_PRESENCE] = {
         masterRep = 0,
@@ -918,6 +930,7 @@ FreeGangs.Callbacks = {
     -- Activities
     CAN_PERFORM_ACTIVITY = 'free-gangs:callback:canPerformActivity',
     GET_PROTECTION_BUSINESSES = 'free-gangs:callback:getProtectionBusinesses',
+    GET_ZONE_BUSINESSES = 'free-gangs:callback:getZoneBusinesses',
     
     -- Graffiti
     GET_NEARBY_GRAFFITI = 'free-gangs:callback:getNearbyGraffiti',

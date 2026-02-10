@@ -171,6 +171,13 @@ function FreeGangs.Client.OnEnterZone(zoneName, territory)
         FreeGangs.Bridge.Notify(message, 'inform', 3000)
     end
     
+    -- Load protection targets for this zone (async, won't block)
+    CreateThread(function()
+        if FreeGangs.Client.Activities and FreeGangs.Client.Activities.LoadZoneProtection then
+            FreeGangs.Client.Activities.LoadZoneProtection(zoneName)
+        end
+    end)
+
     FreeGangs.Utils.Debug('Entered zone:', zoneName)
 end
 
@@ -180,7 +187,12 @@ end
 function FreeGangs.Client.OnExitZone(zoneName, territory)
     -- Notify server
     TriggerServerEvent(FreeGangs.Events.Server.EXIT_TERRITORY, zoneName)
-    
+
+    -- Clear protection targets
+    if FreeGangs.Client.Activities and FreeGangs.Client.Activities.ClearProtectionTargets then
+        FreeGangs.Client.Activities.ClearProtectionTargets()
+    end
+
     -- Clear current zone
     FreeGangs.Client.CurrentZone = nil
 
@@ -517,13 +529,17 @@ end)
 
 AddEventHandler('onResourceStop', function(resourceName)
     if resourceName ~= GetCurrentResourceName() then return end
-    
+
     -- Remove all zones
     for zoneName, zone in pairs(FreeGangs.Client.Zones) do
         zone:remove()
     end
     FreeGangs.Client.Zones = {}
-    
+
+    -- Clean up protection targets
+    if FreeGangs.Client.Activities and FreeGangs.Client.Activities.ClearProtectionTargets then
+        FreeGangs.Client.Activities.ClearProtectionTargets()
+    end
 end)
 
 -- ============================================================================

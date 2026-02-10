@@ -653,28 +653,190 @@ FreeGangs.Config.Activities = {
     Protection = {
         -- Collection interval in real-world hours
         CollectionIntervalHours = 4,
-        
-        -- Base payout range
+
+        -- Base payout range (randomized on registration)
         BasePayoutMin = 200,
         BasePayoutMax = 800,
-        
-        -- Risk of robbery while carrying collection money
-        RobberyVulnerability = true,
-        
-        -- Contested zone payout reduction (per 5% of opposition control)
-        ContestedReduction = 0.05, -- -5% per 5% opposition
-        
-        -- Businesses that can be extorted (identifiers)
-        ExtortableBusinesses = {
-            '247supermarket',
-            'ltdgasoline',
-            'robsliquor',
-            'binco',
-            'suburban',
-            'ponsonbys',
-            'ammunation',
-            'tattoo',
-            'barber',
+
+        -- Distance checks
+        CollectionDistance = 10.0,       -- Must be within this distance to collect
+        RegistrationDistance = 5.0,      -- Must be within this distance to register/takeover
+
+        -- Min zone control to register or collect (percentage, 0-100)
+        MinControlForProtection = 51,
+
+        -- ====================================================================
+        -- INTIMIDATION SYSTEM (Business Registration)
+        -- ====================================================================
+        Intimidation = {
+            Duration = 8000,                -- Progress bar duration (ms)
+
+            -- Base success chance before modifiers (0-100)
+            BaseSuccessChance = 50,
+
+            -- Zone control bonus: +ControlBonus% per % of control above MinControlForProtection
+            -- e.g. at 70% control with 51% min: (70-51) * 0.8 = +15.2%
+            ControlBonus = 0.8,
+
+            -- Penalty when the business is already extorted by another gang
+            -- Flat % reduction - the owner is already afraid of someone else
+            AlreadyExtortedPenalty = 25,
+
+            -- Heat penalty: -HeatPenaltyPerPoint% per heat point between your gang
+            -- and the gang currently protecting this business
+            HeatPenaltyPerPoint = 0.3,
+
+            -- Contestation penalty: -ContestationPenalty% per % of zone controlled
+            -- by rival gangs (total opposition influence in the zone)
+            ContestationPenalty = 0.2,
+
+            -- Cooldown after a failed attempt (seconds) per business
+            FailCooldown = 1800,            -- 30 minutes
+
+            -- Heat generated on failed intimidation attempt
+            FailHeat = 5,
+
+            -- Animation for intimidation scene
+            Animation = {
+                dict = 'anim@gang_intimidation',
+                anim = 'place_cash_on_counter',
+                -- Fallback if above doesn't load
+                fallbackDict = 'mp_common',
+                fallbackAnim = 'givetake1_a',
+            },
+
+            -- NPC owner reaction animations
+            OwnerReactions = {
+                scared = { dict = 'missminuteman_1ig_2', anim = 'handsup_base', duration = 3000 },
+                resistant = { dict = 'gestures@m@standing@casual', anim = 'gesture_head_no', duration = 2000 },
+                compliant = { dict = 'mp_common', anim = 'givetake1_b', duration = 2000 },
+            },
+        },
+
+        -- ====================================================================
+        -- COLLECTION SYSTEM (Physical Pickup)
+        -- ====================================================================
+        Collection = {
+            -- Animation when collecting from NPC business (has a ped)
+            NpcAnimation = {
+                dict = 'mp_common',
+                anim = 'givetake1_a',
+                duration = 3000,
+                flag = 49,
+            },
+
+            -- Animation when collecting from player-owned business (no ped)
+            TargetAnimation = {
+                dict = 'anim@heists@ornate_bank@grab_cash_heels',
+                anim = 'grab',
+                -- Fallback if above doesn't load
+                fallbackDict = 'mp_common',
+                fallbackAnim = 'givetake1_a',
+                duration = 2500,
+                flag = 49,
+            },
+        },
+
+        -- ====================================================================
+        -- RIVAL TAKEOVER SYSTEM
+        -- ====================================================================
+        Takeover = {
+            Enabled = true,
+
+            -- Additional success penalty vs initial registration (-% flat)
+            -- Taking over is harder than fresh registration
+            SuccessPenalty = 15,
+
+            -- Heat generated between gangs on successful takeover
+            HeatGenerated = 20,
+
+            -- Cooldown before a business can be taken over again (seconds)
+            CooldownAfterTakeover = 7200,   -- 2 hours
+
+            -- Duration of takeover progress bar (ms)
+            Duration = 12000,
+
+            -- Animation for takeover scene
+            Animation = {
+                dict = 'anim@heists@ornate_bank@thermal_charge',
+                anim = 'thermal_charge',
+                fallbackDict = 'mp_missheist_countrybank@aim',
+                fallbackAnim = 'aim_loop',
+                duration = 12000,
+                flag = 49,
+            },
+        },
+
+        -- ====================================================================
+        -- BUSINESS REGISTRY
+        -- Defines all extortable locations with coords, zone, and NPC info.
+        -- type: 'npc_shop' (has owner ped) or 'player_business' (target only)
+        -- pedModel: ped hash/name for NPC shops, nil for player businesses
+        -- ====================================================================
+        Businesses = {
+            -- Grove Street area
+            { id = '247_grove', label = '24/7 Grove St', zone = 'grove_street',
+              coords = vector3(25.7, -1347.3, 29.5), pedModel = 's_m_m_storemanager_01', type = 'npc_shop' },
+            { id = 'barber_grove', label = 'Davis Barber', zone = 'grove_street',
+              coords = vector3(-32.9, -1453.7, 30.5), pedModel = 's_m_m_hairdresser_01', type = 'npc_shop' },
+
+            -- Davis Courts
+            { id = '247_davis', label = '24/7 Davis', zone = 'davis_courts',
+              coords = vector3(73.2, -1961.5, 21.3), pedModel = 's_m_m_storemanager_01', type = 'npc_shop' },
+
+            -- Strawberry
+            { id = 'liquor_strawberry', label = 'Rob\'s Liquor Strawberry', zone = 'strawberry',
+              coords = vector3(288.3, -1854.7, 26.7), pedModel = 's_m_y_ammucity_01', type = 'npc_shop' },
+
+            -- Rancho
+            { id = '247_rancho', label = '24/7 Rancho', zone = 'rancho',
+              coords = vector3(460.9, -1851.2, 27.9), pedModel = 's_m_m_storemanager_01', type = 'npc_shop' },
+
+            -- Chamberlain Hills
+            { id = 'laundromat_chamberlain', label = 'Chamberlain Laundromat', zone = 'chamberlain_hills',
+              coords = vector3(-155.0, -1665.4, 33.0), pedModel = nil, type = 'player_business' },
+
+            -- Vespucci Beach
+            { id = 'tattoo_vespucci', label = 'Vespucci Tattoo', zone = 'vespucci_beach',
+              coords = vector3(-1153.8, -1426.8, 4.9), pedModel = 's_m_m_tattooartist_01', type = 'npc_shop' },
+            { id = 'barber_vespucci', label = 'Beach Barber', zone = 'vespucci_beach',
+              coords = vector3(-1282.6, -1116.8, 6.9), pedModel = 's_m_m_hairdresser_01', type = 'npc_shop' },
+
+            -- Vinewood Boulevard
+            { id = 'tattoo_vinewood', label = 'Vinewood Tattoo', zone = 'vinewood_boulevard',
+              coords = vector3(322.1, 180.4, 103.6), pedModel = 's_m_m_tattooartist_01', type = 'npc_shop' },
+
+            -- Downtown LS
+            { id = 'store_downtown', label = 'Downtown Convenience', zone = 'downtown_los_santos',
+              coords = vector3(143.5, -757.8, 45.2), pedModel = 's_m_m_storemanager_01', type = 'npc_shop' },
+
+            -- Little Seoul
+            { id = 'seoul_laundry', label = 'Seoul Dry Cleaning', zone = 'little_seoul',
+              coords = vector3(-715.3, -910.2, 19.2), pedModel = nil, type = 'player_business' },
+
+            -- La Mesa
+            { id = '247_lamesa', label = '24/7 La Mesa', zone = 'la_mesa',
+              coords = vector3(712.5, -975.6, 24.3), pedModel = 's_m_m_storemanager_01', type = 'npc_shop' },
+
+            -- Mirror Park
+            { id = 'store_mirror', label = 'Mirror Park Store', zone = 'mirror_park',
+              coords = vector3(1087.4, -450.3, 67.2), pedModel = 's_m_m_storemanager_01', type = 'npc_shop' },
+
+            -- Del Perro
+            { id = 'pier_arcade', label = 'Del Perro Pier Arcade', zone = 'del_perro',
+              coords = vector3(-1748.1, -1193.5, 13.0), pedModel = nil, type = 'player_business' },
+
+            -- Rockford Hills
+            { id = 'boutique_rockford', label = 'Rockford Boutique', zone = 'rockford_hills',
+              coords = vector3(-848.3, -98.5, 38.0), pedModel = 's_f_y_shop_mid', type = 'npc_shop' },
+
+            -- Sandy Shores
+            { id = '247_sandy', label = '24/7 Sandy Shores', zone = 'sandy_shores',
+              coords = vector3(1960.2, 3815.8, 32.2), pedModel = 's_m_m_storemanager_01', type = 'npc_shop' },
+
+            -- Paleto Bay
+            { id = 'store_paleto', label = 'Paleto General Store', zone = 'paleto_bay',
+              coords = vector3(-169.4, 6378.5, 31.5), pedModel = 's_m_m_storemanager_01', type = 'npc_shop' },
         },
     },
 }

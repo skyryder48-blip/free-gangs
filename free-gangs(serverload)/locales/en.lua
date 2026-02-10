@@ -235,10 +235,22 @@ FreeGangs.Locale.en = {
         
         -- Protection
         protection_collected = 'Collected %s in protection money',
-        protection_registered = 'Protection registered at %s',
+        protection_registered = '%s is now under your protection',
         protection_not_ready = 'Collection not ready yet',
         protection_no_permission = 'You don\'t have permission to collect',
-        protection_need_control = 'Your gang needs >50%% control to collect protection',
+        protection_need_control = 'Your gang needs majority zone control to run protection',
+        protection_already_yours = 'Your gang already protects this business',
+        protection_already_extorted = 'This business is already paying another gang',
+        protection_intimidation_success = 'The owner has agreed to pay for protection',
+        protection_intimidation_fail = 'The owner refused - they don\'t fear you enough',
+        protection_takeover_success = 'You\'ve muscled out %s and taken over protection',
+        protection_takeover_cooldown = 'This business was recently taken over',
+        protection_takeover_disabled = 'Protection takeover is disabled',
+        protection_too_far = 'You need to be at the business location',
+        protection_suspended = 'Protection suspended - you\'ve lost zone control',
+        protection_rivalry_blocked = 'Protection suspended due to gang rivalry',
+        protection_fail_cooldown = 'Failed recently - wait before trying again',
+        protection_no_businesses = 'No extortable businesses in this area',
     },
     
     -- ========================================================================

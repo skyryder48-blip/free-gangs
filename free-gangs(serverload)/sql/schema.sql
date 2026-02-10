@@ -217,16 +217,18 @@ CREATE TABLE IF NOT EXISTS `freegangs_protection` (
     `zone_name` VARCHAR(50) NULL COMMENT 'Territory zone',
     `coords` JSON NOT NULL COMMENT 'Business location',
     `payout_base` INT UNSIGNED DEFAULT 500 COMMENT 'Base protection payment',
+    `business_type` VARCHAR(20) DEFAULT 'npc_shop' COMMENT 'npc_shop or player_business',
     `established_by` VARCHAR(50) NOT NULL COMMENT 'Citizenid who registered',
     `last_collection` TIMESTAMP NULL,
+    `last_takeover` TIMESTAMP NULL COMMENT 'When this business was last taken over',
     `status` ENUM('active', 'suspended', 'contested') DEFAULT 'active',
-    
+
     UNIQUE KEY `uk_business` (`business_id`),
     INDEX `idx_gang` (`gang_name`),
     INDEX `idx_zone` (`zone_name`),
     INDEX `idx_status` (`status`),
-    
-    CONSTRAINT `fk_protection_gang` FOREIGN KEY (`gang_name`) 
+
+    CONSTRAINT `fk_protection_gang` FOREIGN KEY (`gang_name`)
         REFERENCES `freegangs_gangs`(`name`) ON DELETE CASCADE ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 

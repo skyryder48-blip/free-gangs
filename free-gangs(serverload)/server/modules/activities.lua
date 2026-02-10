@@ -954,75 +954,216 @@ end
 -- PROTECTION RACKET SYSTEM
 -- ============================================================================
 
----Register a business for protection
+-- In-memory cache for failed registration cooldowns: { [businessId] = { [gangName] = timestamp } }
+local protectionFailCooldowns = {}
+
+---Get protection config helper
+---@return table
+local function GetProtectionConfig()
+    return FreeGangs.Config.Activities.Protection or {}
+end
+
+---Validate player proximity to business coords
 ---@param source number Player source
----@param businessData table Business information
+---@param businessCoords table { x, y, z }
+---@param maxDistance number
+---@return boolean
+local function ValidateProtectionProximity(source, businessCoords, maxDistance)
+    local playerPed = GetPlayerPed(source)
+    if not playerPed or playerPed == 0 then return false end
+    local playerCoords = GetEntityCoords(playerPed)
+    local dx = playerCoords.x - (businessCoords.x or businessCoords[1] or 0)
+    local dy = playerCoords.y - (businessCoords.y or businessCoords[2] or 0)
+    local dz = playerCoords.z - (businessCoords.z or businessCoords[3] or 0)
+    return (dx * dx + dy * dy + dz * dz) <= (maxDistance * maxDistance)
+end
+
+---Look up a business from config by its ID
+---@param businessId string
+---@return table|nil
+local function FindBusinessConfig(businessId)
+    local businesses = GetProtectionConfig().Businesses or {}
+    for _, biz in ipairs(businesses) do
+        if biz.id == businessId then return biz end
+    end
+    return nil
+end
+
+---Calculate intimidation success chance (strategic formula)
+---@param gangName string Attempting gang
+---@param zoneName string Zone the business is in
+---@param existingProtector string|nil Gang currently protecting (nil if unprotected)
+---@return number chance 0-100
+---@return table factors Breakdown for logging
+local function CalculateIntimidationChance(gangName, zoneName, existingProtector)
+    local config = GetProtectionConfig()
+    local intim = config.Intimidation or {}
+    local minControl = config.MinControlForProtection or 51
+
+    local base = intim.BaseSuccessChance or 50
+    local factors = { base = base }
+
+    -- 1) Zone control bonus: +ControlBonus per % above minimum
+    local gangInfluence = FreeGangs.Server.Territory.GetInfluence(zoneName, gangName) or 0
+    local controlBonus = math.max(0, (gangInfluence - minControl) * (intim.ControlBonus or 0.8))
+    factors.controlBonus = FreeGangs.Utils.Round(controlBonus, 1)
+
+    -- 2) Already-extorted penalty
+    local extortedPenalty = 0
+    if existingProtector and existingProtector ~= gangName then
+        extortedPenalty = intim.AlreadyExtortedPenalty or 25
+    end
+    factors.extortedPenalty = extortedPenalty
+
+    -- 3) Heat penalty with the current protector
+    local heatPenalty = 0
+    if existingProtector and existingProtector ~= gangName then
+        local heatLevel = FreeGangs.Server.Heat.Get(gangName, existingProtector) or 0
+        heatPenalty = heatLevel * (intim.HeatPenaltyPerPoint or 0.3)
+    end
+    factors.heatPenalty = FreeGangs.Utils.Round(heatPenalty, 1)
+
+    -- 4) Total zone contestation penalty (sum of ALL rival influence)
+    local contestPenalty = 0
+    local territory = FreeGangs.Server.Territories[zoneName]
+    if territory and territory.influence then
+        local totalRivalInfluence = 0
+        for rival, inf in pairs(territory.influence) do
+            if rival ~= gangName and inf > 0 then
+                totalRivalInfluence = totalRivalInfluence + inf
+            end
+        end
+        contestPenalty = totalRivalInfluence * (intim.ContestationPenalty or 0.2)
+    end
+    factors.contestPenalty = FreeGangs.Utils.Round(contestPenalty, 1)
+
+    local finalChance = base + controlBonus - extortedPenalty - heatPenalty - contestPenalty
+    finalChance = FreeGangs.Utils.Clamp(finalChance, 5, 95) -- Always 5-95% bounds
+    factors.final = FreeGangs.Utils.Round(finalChance, 1)
+
+    return finalChance, factors
+end
+
+---Register a business for protection (with strategic intimidation)
+---@param source number Player source
+---@param businessId string Business ID from config
 ---@return boolean success
 ---@return string message
-function FreeGangs.Server.Activities.RegisterProtection(source, businessData)
+---@return table|nil result
+function FreeGangs.Server.Activities.RegisterProtection(source, businessId)
     local citizenid = FreeGangs.Bridge.GetCitizenId(source)
-    if not citizenid then
-        return false, FreeGangs.L('errors', 'not_loaded')
-    end
-    
+    if not citizenid then return false, FreeGangs.L('errors', 'not_loaded'), nil end
+
     local gangData = FreeGangs.Server.GetPlayerGangData(source)
-    if not gangData then
-        return false, FreeGangs.L('gangs', 'not_in_gang')
-    end
-    
-    -- Check permission
+    if not gangData then return false, FreeGangs.L('gangs', 'not_in_gang'), nil end
+
     if not FreeGangs.Server.HasPermission(source, FreeGangs.Permissions.COLLECT_PROTECTION) then
-        return false, FreeGangs.L('general', 'no_permission')
+        return false, FreeGangs.L('general', 'no_permission'), nil
     end
-    
-    -- Check zone control requirement
-    local zoneName = businessData.zone_name
-    if zoneName then
-        local controlTier = GetZoneControlTier(zoneName, gangData.gang.name)
-        if not controlTier.canCollectProtection then
-            return false, FreeGangs.L('activities', 'protection_need_control')
+
+    -- Validate business exists in config
+    local bizConfig = FindBusinessConfig(businessId)
+    if not bizConfig then return false, FreeGangs.L('activities', 'invalid_target'), nil end
+
+    local config = GetProtectionConfig()
+    local zoneName = bizConfig.zone
+
+    -- Validate proximity
+    if not ValidateProtectionProximity(source, bizConfig.coords, config.RegistrationDistance or 5.0) then
+        return false, FreeGangs.L('activities', 'protection_too_far'), nil
+    end
+
+    -- Check zone control meets minimum
+    local gangInfluence = FreeGangs.Server.Territory.GetInfluence(zoneName, gangData.gang.name) or 0
+    local minControl = config.MinControlForProtection or 51
+    if gangInfluence < minControl then
+        return false, FreeGangs.L('activities', 'protection_need_control'), nil
+    end
+
+    -- Check failed attempt cooldown
+    local now = FreeGangs.Utils.GetTimestamp()
+    local failCooldown = config.Intimidation and config.Intimidation.FailCooldown or 1800
+    local bizCooldowns = protectionFailCooldowns[businessId]
+    if bizCooldowns and bizCooldowns[gangData.gang.name] then
+        local elapsed = now - bizCooldowns[gangData.gang.name]
+        if elapsed < failCooldown then
+            return false, FreeGangs.L('activities', 'protection_fail_cooldown'), nil
         end
     end
-    
-    -- Check if business already registered
-    local existingProtection = MySQL.single.await([[
-        SELECT gang_name, status FROM freegangs_protection WHERE business_id = ? AND status = 'active'
-    ]], { businessData.business_id })
-    
-    if existingProtection then
-        if existingProtection.gang_name == gangData.gang.name then
-            return false, 'Already registered to your gang'
-        else
-            return false, 'This business is protected by another gang'
+
+    -- Check existing protection
+    local existing = FreeGangs.Server.DB.GetBusinessProtection(businessId)
+    local existingProtector = nil
+    if existing and existing.status == 'active' then
+        if existing.gang_name == gangData.gang.name then
+            return false, FreeGangs.L('activities', 'protection_already_yours'), nil
         end
+        existingProtector = existing.gang_name
     end
-    
-    -- Register protection
+
+    -- Calculate intimidation success chance
+    local chance, factors = CalculateIntimidationChance(gangData.gang.name, zoneName, existingProtector)
+
+    -- Roll the dice
+    local roll = math.random(100)
+    local success = roll <= chance
+
+    if not success then
+        -- Track fail cooldown
+        protectionFailCooldowns[businessId] = protectionFailCooldowns[businessId] or {}
+        protectionFailCooldowns[businessId][gangData.gang.name] = now
+
+        -- Add fail heat
+        local failHeat = config.Intimidation and config.Intimidation.FailHeat or 5
+        FreeGangs.Server.AddPlayerHeat(citizenid, failHeat)
+
+        FreeGangs.Server.DB.Log(gangData.gang.name, citizenid, 'protection_intimidation_failed', FreeGangs.LogCategories.ACTIVITY, {
+            business_id = businessId, zone = zoneName, chance = chance, roll = roll, factors = factors,
+        })
+
+        return false, FreeGangs.L('activities', 'protection_intimidation_fail'), { chance = chance, factors = factors }
+    end
+
+    -- Success: register protection
+    local payout = math.random(config.BasePayoutMin or 200, config.BasePayoutMax or 800)
+
     local insertData = {
         gang_name = gangData.gang.name,
-        business_id = businessData.business_id,
-        business_label = businessData.business_label,
+        business_id = businessId,
+        business_label = bizConfig.label,
         zone_name = zoneName,
-        coords = businessData.coords,
-        payout_base = math.random(
-            FreeGangs.Config.Activities.Protection.BasePayoutMin or 200,
-            FreeGangs.Config.Activities.Protection.BasePayoutMax or 800
-        ),
+        coords = bizConfig.coords,
+        payout_base = payout,
+        business_type = bizConfig.type or 'npc_shop',
         established_by = citizenid,
     }
-    
+
     local insertId = FreeGangs.Server.DB.RegisterProtection(insertData)
-    if not insertId then
-        return false, FreeGangs.L('errors', 'server_error')
+    if not insertId then return false, FreeGangs.L('errors', 'server_error'), nil end
+
+    -- Activity rewards
+    local activityPoints = FreeGangs.ActivityPoints[FreeGangs.Activities.PROTECTION_REGISTER]
+    FreeGangs.Server.AddGangReputation(gangData.gang.name, activityPoints.masterRep, citizenid, 'protection_registered')
+    if zoneName then
+        AddZoneInfluence(zoneName, gangData.gang.name, activityPoints.zoneInfluence)
     end
-    
+    FreeGangs.Server.AddPlayerHeat(citizenid, activityPoints.heat)
+
+    -- Record crime stat + dispatch
+    RecordCrimeStat(citizenid, 'protection_register', { cash = 0 })
+    TriggerDispatch(source, 'extortion', 2, { business = bizConfig.label })
+
     FreeGangs.Server.DB.Log(gangData.gang.name, citizenid, 'protection_registered', FreeGangs.LogCategories.ACTIVITY, {
-        business_id = businessData.business_id,
-        business_label = businessData.business_label,
-        zone = zoneName,
+        business_id = businessId, business_label = bizConfig.label, zone = zoneName,
+        chance = chance, roll = roll, factors = factors, payout_base = payout,
     })
-    
-    return true, FreeGangs.L('activities', 'protection_registered', businessData.business_label or businessData.business_id)
+
+    return true, FreeGangs.L('activities', 'protection_registered', bizConfig.label), {
+        business = bizConfig.label,
+        chance = chance,
+        rep = activityPoints.masterRep,
+        heat = activityPoints.heat,
+    }
 end
 
 ---Collect protection money from a business
@@ -1033,32 +1174,36 @@ end
 ---@return table|nil result
 function FreeGangs.Server.Activities.CollectProtection(source, businessId)
     local citizenid = FreeGangs.Bridge.GetCitizenId(source)
-    if not citizenid then
-        return false, FreeGangs.L('errors', 'not_loaded'), nil
-    end
-    
+    if not citizenid then return false, FreeGangs.L('errors', 'not_loaded'), nil end
+
     local gangData = FreeGangs.Server.GetPlayerGangData(source)
-    if not gangData then
-        return false, FreeGangs.L('gangs', 'not_in_gang'), nil
-    end
-    
-    -- Check permission
+    if not gangData then return false, FreeGangs.L('gangs', 'not_in_gang'), nil end
+
     if not FreeGangs.Server.HasPermission(source, FreeGangs.Permissions.COLLECT_PROTECTION) then
         return false, FreeGangs.L('activities', 'protection_no_permission'), nil
     end
-    
+
     -- Get protection record
     local protection = MySQL.single.await([[
         SELECT * FROM freegangs_protection WHERE business_id = ? AND gang_name = ? AND status = 'active'
     ]], { businessId, gangData.gang.name })
-    
+
     if not protection then
         return false, FreeGangs.L('activities', 'invalid_target'), nil
     end
-    
-    -- Check collection cooldown (use CollectionIntervalHours from config)
-    local collectionCooldownHours = FreeGangs.Config.Activities.Protection and
-                                    FreeGangs.Config.Activities.Protection.CollectionIntervalHours or 4
+
+    -- Validate proximity to business
+    local bizConfig = FindBusinessConfig(businessId)
+    local config = GetProtectionConfig()
+    local collectionDist = config.CollectionDistance or 10.0
+    if bizConfig then
+        if not ValidateProtectionProximity(source, bizConfig.coords, collectionDist) then
+            return false, FreeGangs.L('activities', 'protection_too_far'), nil
+        end
+    end
+
+    -- Check collection cooldown
+    local collectionCooldownHours = config.CollectionIntervalHours or 4
     local collectionCooldown = collectionCooldownHours * 3600
     local lastCollection = protectionCollections[businessId] or 0
     local now = FreeGangs.Utils.GetTimestamp()
@@ -1075,20 +1220,18 @@ function FreeGangs.Server.Activities.CollectProtection(source, businessId)
         return false, FreeGangs.L('activities', 'protection_not_ready') .. ' (' .. FreeGangs.Utils.FormatDuration(remaining * 1000) .. ')', nil
     end
 
-    -- Immediately claim the slot to prevent TOCTOU race condition
+    -- Claim slot atomically
     protectionCollections[businessId] = now
-    
+
     -- Check zone control
     local zoneName = protection.zone_name
     local controlTier = GetZoneControlTier(zoneName, gangData.gang.name)
-    
+
     if not controlTier.canCollectProtection then
-        MySQL.update.await([[
-            UPDATE freegangs_protection SET status = 'suspended' WHERE business_id = ?
-        ]], { businessId })
-        return false, FreeGangs.L('activities', 'protection_need_control'), nil
+        FreeGangs.Server.DB.SuspendProtection(businessId)
+        return false, FreeGangs.L('activities', 'protection_suspended'), nil
     end
-    
+
     -- Check rivalry effect
     if zoneName then
         local territory = FreeGangs.Server.Territories[zoneName]
@@ -1096,60 +1239,56 @@ function FreeGangs.Server.Activities.CollectProtection(source, businessId)
             local owner = FreeGangs.Server.GetZoneOwner(zoneName)
             if owner and owner ~= gangData.gang.name then
                 local stage = GetHeatStage(gangData.gang.name, owner)
-                if (stage == FreeGangs.HeatStages.RIVALRY or stage == FreeGangs.HeatStages.WAR_READY) 
+                if (stage == FreeGangs.HeatStages.RIVALRY or stage == FreeGangs.HeatStages.WAR_READY)
                    and FreeGangs.Config.Heat.Rivalry.ProtectionStopped then
-                    return false, 'Protection collection suspended due to gang rivalry', nil
+                    return false, FreeGangs.L('activities', 'protection_rivalry_blocked'), nil
                 end
             end
         end
     end
-    
+
     -- Calculate payout
     local basePayout = protection.payout_base or 500
     local multiplier = controlTier.protectionMultiplier or 1
-    
+
     -- Apply archetype bonus
     if gangData.gang.archetype == FreeGangs.Archetypes.CRIME_FAMILY then
         multiplier = multiplier * (1 + FreeGangs.ArchetypePassiveBonuses[FreeGangs.Archetypes.CRIME_FAMILY].protectionIncome)
     end
-    
-    -- Apply contested zone penalty
+
+    -- Apply contested zone penalty (dynamic based on opposition influence)
     if zoneName and controlTier.influence < 80 then
         local oppositionInfluence = 100 - controlTier.influence
         local penaltyPercent = math.floor(oppositionInfluence / 5) * 5
         multiplier = multiplier * (1 - (penaltyPercent / 100))
     end
-    
+
     local finalPayout = math.floor(basePayout * multiplier)
-    
-    -- Persist collection timestamp to database
+
+    -- Persist collection timestamp
     FreeGangs.Server.DB.UpdateProtectionCollection(businessId)
-    
+
     -- Give money
     FreeGangs.Bridge.AddMoney(source, finalPayout, 'cash', 'protection-collection')
-    
-    -- Get activity points
+
+    -- Activity rewards
     local activityPoints = FreeGangs.ActivityPoints[FreeGangs.Activities.PROTECTION_COLLECT]
-    
-    -- Add reputation
     FreeGangs.Server.AddGangReputation(gangData.gang.name, activityPoints.masterRep, citizenid, 'protection_collection')
-    
-    -- Add zone influence
+
     if zoneName then
         AddZoneInfluence(zoneName, gangData.gang.name, activityPoints.zoneInfluence)
     end
-    
-    -- Add heat
+
     FreeGangs.Server.AddPlayerHeat(citizenid, activityPoints.heat)
-    
-    -- Log activity
+
+    -- Record crime stat + dispatch
+    RecordCrimeStat(citizenid, 'protection_collect', { cash = finalPayout })
+    TriggerDispatch(source, 'extortion', 2, { business = protection.business_label or businessId })
+
     FreeGangs.Server.DB.Log(gangData.gang.name, citizenid, 'protection_collected', FreeGangs.LogCategories.ACTIVITY, {
-        business_id = businessId,
-        payout = finalPayout,
-        multiplier = multiplier,
-        zone = zoneName,
+        business_id = businessId, payout = finalPayout, multiplier = multiplier, zone = zoneName,
     })
-    
+
     return true, FreeGangs.L('activities', 'protection_collected', FreeGangs.Bridge.FormatMoney(finalPayout)), {
         payout = finalPayout,
         business = protection.business_label or businessId,
@@ -1158,7 +1297,208 @@ function FreeGangs.Server.Activities.CollectProtection(source, businessId)
     }
 end
 
----Get all protection businesses for a gang
+---Take over a rival gang's protected business
+---@param source number Player source
+---@param businessId string Business ID
+---@return boolean success
+---@return string message
+---@return table|nil result
+function FreeGangs.Server.Activities.TakeoverProtection(source, businessId)
+    local citizenid = FreeGangs.Bridge.GetCitizenId(source)
+    if not citizenid then return false, FreeGangs.L('errors', 'not_loaded'), nil end
+
+    local gangData = FreeGangs.Server.GetPlayerGangData(source)
+    if not gangData then return false, FreeGangs.L('gangs', 'not_in_gang'), nil end
+
+    local config = GetProtectionConfig()
+    local takeoverConfig = config.Takeover or {}
+
+    if not takeoverConfig.Enabled then
+        return false, FreeGangs.L('activities', 'protection_takeover_disabled'), nil
+    end
+
+    if not FreeGangs.Server.HasPermission(source, FreeGangs.Permissions.COLLECT_PROTECTION) then
+        return false, FreeGangs.L('general', 'no_permission'), nil
+    end
+
+    -- Validate business exists
+    local bizConfig = FindBusinessConfig(businessId)
+    if not bizConfig then return false, FreeGangs.L('activities', 'invalid_target'), nil end
+
+    -- Validate proximity
+    if not ValidateProtectionProximity(source, bizConfig.coords, config.RegistrationDistance or 5.0) then
+        return false, FreeGangs.L('activities', 'protection_too_far'), nil
+    end
+
+    -- Get existing protection (must be owned by a rival)
+    local existing = FreeGangs.Server.DB.GetBusinessProtection(businessId)
+    if not existing or existing.status ~= 'active' then
+        return false, FreeGangs.L('activities', 'invalid_target'), nil
+    end
+
+    if existing.gang_name == gangData.gang.name then
+        return false, FreeGangs.L('activities', 'protection_already_yours'), nil
+    end
+
+    local rivalGang = existing.gang_name
+    local zoneName = bizConfig.zone
+
+    -- Check zone control
+    local gangInfluence = FreeGangs.Server.Territory.GetInfluence(zoneName, gangData.gang.name) or 0
+    local minControl = config.MinControlForProtection or 51
+    if gangInfluence < minControl then
+        return false, FreeGangs.L('activities', 'protection_need_control'), nil
+    end
+
+    -- Check takeover cooldown
+    local now = FreeGangs.Utils.GetTimestamp()
+    if existing.last_takeover then
+        local lastTakeover = FreeGangs.Utils.ParseTimestamp(existing.last_takeover)
+        if lastTakeover then
+            local cooldown = takeoverConfig.CooldownAfterTakeover or 7200
+            if now - lastTakeover < cooldown then
+                return false, FreeGangs.L('activities', 'protection_takeover_cooldown'), nil
+            end
+        end
+    end
+
+    -- Check fail cooldown (shares with registration)
+    local failCooldown = config.Intimidation and config.Intimidation.FailCooldown or 1800
+    local bizCooldowns = protectionFailCooldowns[businessId]
+    if bizCooldowns and bizCooldowns[gangData.gang.name] then
+        if now - bizCooldowns[gangData.gang.name] < failCooldown then
+            return false, FreeGangs.L('activities', 'protection_fail_cooldown'), nil
+        end
+    end
+
+    -- Calculate intimidation chance with takeover penalty
+    local chance, factors = CalculateIntimidationChance(gangData.gang.name, zoneName, rivalGang)
+    local takeoverPenalty = takeoverConfig.SuccessPenalty or 15
+    chance = FreeGangs.Utils.Clamp(chance - takeoverPenalty, 5, 95)
+    factors.takeoverPenalty = takeoverPenalty
+    factors.final = FreeGangs.Utils.Round(chance, 1)
+
+    -- Roll
+    local roll = math.random(100)
+    local success = roll <= chance
+
+    if not success then
+        protectionFailCooldowns[businessId] = protectionFailCooldowns[businessId] or {}
+        protectionFailCooldowns[businessId][gangData.gang.name] = now
+
+        local failHeat = config.Intimidation and config.Intimidation.FailHeat or 5
+        FreeGangs.Server.AddPlayerHeat(citizenid, failHeat)
+        AddHeat(gangData.gang.name, rivalGang, failHeat, 'protection_takeover_attempt')
+
+        FreeGangs.Server.DB.Log(gangData.gang.name, citizenid, 'protection_takeover_failed', FreeGangs.LogCategories.ACTIVITY, {
+            business_id = businessId, rival = rivalGang, zone = zoneName,
+            chance = chance, roll = roll, factors = factors,
+        })
+
+        return false, FreeGangs.L('activities', 'protection_intimidation_fail'), { chance = chance, factors = factors }
+    end
+
+    -- Success: transfer protection
+    local newPayout = math.random(config.BasePayoutMin or 200, config.BasePayoutMax or 800)
+    FreeGangs.Server.DB.TransferProtection(businessId, gangData.gang.name, citizenid, newPayout)
+
+    -- Generate heat between gangs
+    local takeoverHeat = takeoverConfig.HeatGenerated or 20
+    AddHeat(gangData.gang.name, rivalGang, takeoverHeat, 'protection_takeover')
+
+    -- Activity rewards
+    local activityPoints = FreeGangs.ActivityPoints[FreeGangs.Activities.PROTECTION_TAKEOVER]
+    FreeGangs.Server.AddGangReputation(gangData.gang.name, activityPoints.masterRep, citizenid, 'protection_takeover')
+    if zoneName then
+        AddZoneInfluence(zoneName, gangData.gang.name, activityPoints.zoneInfluence)
+    end
+    FreeGangs.Server.AddPlayerHeat(citizenid, activityPoints.heat)
+
+    -- Record crime stat + dispatch
+    RecordCrimeStat(citizenid, 'protection_takeover', { cash = 0 })
+    TriggerDispatch(source, 'extortion', 3, { business = bizConfig.label })
+
+    FreeGangs.Server.DB.Log(gangData.gang.name, citizenid, 'protection_takeover', FreeGangs.LogCategories.ACTIVITY, {
+        business_id = businessId, rival = rivalGang, zone = zoneName,
+        chance = chance, roll = roll, factors = factors, heat = takeoverHeat,
+    })
+
+    return true, FreeGangs.L('activities', 'protection_takeover_success', rivalGang), {
+        business = bizConfig.label,
+        rival = rivalGang,
+        chance = chance,
+        rep = activityPoints.masterRep,
+        heat = activityPoints.heat + takeoverHeat,
+    }
+end
+
+---Get available businesses for a zone (with status info)
+---@param gangName string
+---@param zoneName string
+---@return table businesses List of { id, label, coords, type, pedModel, status, protector, isReady, timeRemaining }
+function FreeGangs.Server.Activities.GetZoneBusinesses(gangName, zoneName)
+    local config = GetProtectionConfig()
+    local businesses = config.Businesses or {}
+    local now = FreeGangs.Utils.GetTimestamp()
+    local collectionCooldown = (config.CollectionIntervalHours or 4) * 3600
+
+    -- Filter to this zone
+    local zoneBusinesses = {}
+    for _, biz in ipairs(businesses) do
+        if biz.zone == zoneName then
+            zoneBusinesses[#zoneBusinesses + 1] = biz
+        end
+    end
+
+    -- Get existing protection records for this zone
+    local zoneProtection = FreeGangs.Server.DB.GetZoneProtection(zoneName)
+    local protectionMap = {}
+    for _, record in ipairs(zoneProtection) do
+        protectionMap[record.business_id] = record
+    end
+
+    local result = {}
+    for _, biz in ipairs(zoneBusinesses) do
+        local record = protectionMap[biz.id]
+        local entry = {
+            id = biz.id,
+            label = biz.label,
+            coords = { x = biz.coords.x, y = biz.coords.y, z = biz.coords.z },
+            type = biz.type,
+            pedModel = biz.pedModel,
+            status = 'unprotected',
+            protector = nil,
+            isReady = false,
+            timeRemaining = 0,
+            payout_base = 0,
+        }
+
+        if record and record.status == 'active' then
+            entry.status = record.gang_name == gangName and 'owned' or 'rival'
+            entry.protector = record.gang_name
+            entry.payout_base = record.payout_base or 0
+
+            if entry.status == 'owned' then
+                local lastCollection = 0
+                if protectionCollections[biz.id] then
+                    lastCollection = protectionCollections[biz.id]
+                end
+                if record.last_collection then
+                    local dbTime = FreeGangs.Utils.ParseTimestamp(record.last_collection)
+                    if dbTime and dbTime > lastCollection then lastCollection = dbTime end
+                end
+                entry.isReady = (now - lastCollection) >= collectionCooldown
+                entry.timeRemaining = entry.isReady and 0 or (collectionCooldown - (now - lastCollection))
+            end
+        end
+
+        result[#result + 1] = entry
+    end
+
+    return result
+end
+
+---Get all protection businesses for a gang (legacy compat)
 ---@param gangName string
 ---@return table businesses
 function FreeGangs.Server.Activities.GetGangProtectionBusinesses(gangName)
